@@ -1,0 +1,5 @@
+streamlit
+pydantic
+folium
+streamlit-folium
+geopy
