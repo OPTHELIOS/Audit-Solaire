@@ -82,3 +82,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+import streamlit as st
+from PIL import Image
+
+logo = Image.open("assets/opthelios_logo.png")
+
+st.set_page_config(
+    page_title="OPT'HELIOS - Audit Solaire Thermique",
+    page_icon=logo,  # ou "assets/opthelios_logo.png"
+    layout="wide",
+)
+
+st.sidebar.image("assets/opthelios_logo.png", use_column_width=True)
