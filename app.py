@@ -1,6 +1,7 @@
 import streamlit as st
+from PIL import Image
 
-from ui.state import get_audit, init_session_state, save_audit
+from ui.state import get_audit, init_session_state, save_audit as save_audit_session
 from ui.pages import (
     _01_dossier,
     _02_controles,
@@ -8,12 +9,14 @@ from ui.pages import (
     _04_installation,
     _10_synthese,
 )
+from repositories.onedrive_repository import save_audit, load_audit, list_audits
 
+logo = Image.open("assets/opthelios_logo.png")
 
 st.set_page_config(
     page_title="OPT'HELIOS - Audit Solaire Thermique",
+    page_icon=logo,
     layout="wide",
-    page_icon="☀️",
 )
 
 
@@ -43,15 +46,58 @@ def render_infos_audit() -> None:
     st.write(f"Nombre de constats : {len(audit.constats)}")
     st.write(f"Nombre de preuves : {len(audit.preuves)}")
 
-    if st.button("Mettre à jour l'audit en session", type="primary"):
-        save_audit(audit)
-        st.success("Audit mis à jour dans la session en cours.")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Mettre à jour l'audit en session", type="secondary"):
+            save_audit_session(audit)
+            st.success("Audit mis à jour dans la session en cours.")
+
+    with col2:
+        if st.button("Sauvegarder dans OneDrive", type="primary"):
+            save_audit_session(audit)
+            audit_id = save_audit(audit)
+            st.success(f"Audit sauvegardé dans OneDrive : {audit_id}")
+
+    st.divider()
+    st.subheader("Reprendre un audit sauvegardé")
+
+    audits = list_audits()
+
+    if not audits:
+        st.info("Aucun audit sauvegardé dans OneDrive.")
+    else:
+        options = {}
+        for a in audits:
+            audit_id = a.get("audit_id", "")
+            numero = a.get("numero_audit", "")
+            commune = a.get("commune", "")
+            date_modif = a.get("date_modification", "")
+            label = f"{numero} | {commune} | {date_modif} | {audit_id}"
+            options[label] = audit_id
+
+        selected_label = st.selectbox(
+            "Choisir un audit à rouvrir",
+            list(options.keys()),
+        )
+
+        if st.button("Ouvrir l'audit sélectionné"):
+            loaded_audit = load_audit(options[selected_label])
+
+            if loaded_audit is None:
+                st.error("Impossible de charger cet audit depuis OneDrive.")
+            else:
+                save_audit_session(loaded_audit)
+                st.success("Audit rechargé avec succès.")
+                st.rerun()
 
 
 def main() -> None:
     init_session_state()
 
+    st.sidebar.image("assets/opthelios_logo.png", use_container_width=True)
     st.sidebar.title("Navigation")
+
     page = st.sidebar.radio(
         "Aller vers",
         [
@@ -82,16 +128,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-import streamlit as st
-from PIL import Image
-
-logo = Image.open("assets/opthelios_logo.png")
-
-st.set_page_config(
-    page_title="OPT'HELIOS - Audit Solaire Thermique",
-    page_icon=logo,  # ou "assets/opthelios_logo.png"
-    layout="wide",
-)
-
-st.sidebar.image("assets/opthelios_logo.png", use_column_width=True)
