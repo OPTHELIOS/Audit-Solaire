@@ -1,21 +1,34 @@
+from __future__ import annotations
+
 import streamlit as st
 from PIL import Image
 
-from ui.state import get_audit, init_session_state, save_audit as save_audit_session
-from ui.pages import (
-    _01_dossier,
-    _02_controles,
-    _03_preuves,
-    _04_installation,
-    _10_synthese,
-)
-from repositories.onedrive_repository import save_audit, load_audit, list_audits
+import ui.pages._01_dossier as _01_dossier
+import ui.pages._02_controles as _02_controles
+import ui.pages._03_preuves as _03_preuves
+import ui.pages._04_installation as _04_installation
+import ui.pages._05_synthese as _05_synthese
+import ui.pages._06_export as _06_export
 
-logo = Image.open("assets/opthelios_logo.png")
+from repositories.onedrive_repository import list_audits, load_audit, save_audit
+from ui.state import get_audit, init_session_state, save_audit as save_audit_session
+
+
+LOGO_PATH = "assets/opthelios_logo.png"
+
+
+def _load_logo() -> Image.Image | None:
+    try:
+        return Image.open(LOGO_PATH)
+    except Exception:
+        return None
+
+
+logo = _load_logo()
 
 st.set_page_config(
     page_title="OPT'HELIOS - Audit Solaire Thermique",
-    page_icon=logo,
+    page_icon=logo if logo is not None else None,
     layout="wide",
 )
 
@@ -24,6 +37,7 @@ def render_infos_audit() -> None:
     audit = get_audit()
 
     st.header("Infos audit")
+
     st.write(f"Numéro d'audit : {audit.meta.numero_audit}")
     st.write(f"Statut : {audit.meta.statut.value}")
     st.write(f"Date d'audit : {audit.meta.date_audit}")
@@ -66,36 +80,39 @@ def render_infos_audit() -> None:
 
     if not audits:
         st.info("Aucun audit sauvegardé dans OneDrive.")
-    else:
-        options = {}
-        for a in audits:
-            audit_id = a.get("audit_id", "")
-            numero = a.get("numero_audit", "")
-            commune = a.get("commune", "")
-            date_modif = a.get("date_modification", "")
-            label = f"{numero} | {commune} | {date_modif} | {audit_id}"
-            options[label] = audit_id
+        return
 
-        selected_label = st.selectbox(
-            "Choisir un audit à rouvrir",
-            list(options.keys()),
-        )
+    options: dict[str, str] = {}
+    for item in audits:
+        audit_id = item.get("audit_id", "")
+        numero = item.get("numero_audit", "")
+        commune = item.get("commune", "")
+        date_modification = item.get("date_modification", "")
+        label = f"{numero} | {commune} | {date_modification} | {audit_id}"
+        options[label] = audit_id
 
-        if st.button("Ouvrir l'audit sélectionné"):
-            loaded_audit = load_audit(options[selected_label])
+    selected_label = st.selectbox(
+        "Choisir un audit à rouvrir",
+        list(options.keys()),
+    )
 
-            if loaded_audit is None:
-                st.error("Impossible de charger cet audit depuis OneDrive.")
-            else:
-                save_audit_session(loaded_audit)
-                st.success("Audit rechargé avec succès.")
-                st.rerun()
+    if st.button("Ouvrir l'audit sélectionné"):
+        loaded_audit = load_audit(options[selected_label])
+
+        if loaded_audit is None:
+            st.error("Impossible de charger cet audit depuis OneDrive.")
+        else:
+            save_audit_session(loaded_audit)
+            st.success("Audit rechargé avec succès.")
+            st.rerun()
 
 
 def main() -> None:
     init_session_state()
 
-    st.sidebar.image("assets/opthelios_logo.png", use_container_width=True)
+    if logo is not None:
+        st.sidebar.image(LOGO_PATH, use_container_width=True)
+
     st.sidebar.title("Navigation")
 
     page = st.sidebar.radio(
@@ -106,6 +123,7 @@ def main() -> None:
             "Contrôles techniques",
             "Preuves et annexes",
             "Synthèse",
+            "Export",
             "Infos audit",
         ],
     )
@@ -121,7 +139,9 @@ def main() -> None:
     elif page == "Preuves et annexes":
         _03_preuves.render()
     elif page == "Synthèse":
-        _10_synthese.render()
+        _05_synthese.render()
+    elif page == "Export":
+        _06_export.render()
     elif page == "Infos audit":
         render_infos_audit()
 
