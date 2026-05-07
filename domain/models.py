@@ -157,11 +157,16 @@ class ConstatControle(BaseModel):
     controle_id: str
     section: str
     libelle: str
-    verdict: VerdictControle = VerdictControle.non_verifiable
+    verdict: VerdictControle | None = None
     criticite: Criticite = Criticite.mineure
+    criticite_finale: Criticite = Criticite.mineure
     observation: Optional[str] = None
     preuve_ids: list[str] = Field(default_factory=list)
+    preuve_documentaire: Optional[str] = None
+    photos: list[str] = Field(default_factory=list)
     recommandation: Optional[str] = None
+    recommandation_personnalisee: Optional[str] = None
+    non_verifiable_raison: Optional[str] = None
 
 
 class SyntheseAudit(BaseModel):

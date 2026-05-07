@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from docx import Document
-from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
@@ -140,12 +139,19 @@ def _add_bullets(document: Document, lines: list[str]) -> None:
         document.add_paragraph(line, style="List Bullet")
 
 
+def _resolve_expert_conclusion(payload: dict[str, Any]) -> str:
+    return _safe_str(
+        payload.get("expert_conclusion")
+        or payload.get("global_assessment", {}).get("commentaire_global", "")
+    )
+
+
 def _add_global_assessment(document: Document, payload: dict[str, Any]) -> None:
     ga = payload["global_assessment"]
     counts = payload["counts"]
 
     document.add_heading("1. Appréciation globale", level=1)
-    document.add_paragraph(ga["commentaire_global"])
+    document.add_paragraph(_safe_str(ga["commentaire_global"]))
 
     table = document.add_table(rows=1, cols=5)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -184,6 +190,15 @@ def _add_executive_summary(document: Document, payload: dict[str, Any]) -> None:
 
     document.add_heading("2.2 Note méthodologique", level=2)
     _add_bullets(document, payload["methodology_note"])
+
+
+def _add_expert_conclusion_section(document: Document, payload: dict[str, Any]) -> None:
+    expert_conclusion = _resolve_expert_conclusion(payload)
+    if not expert_conclusion:
+        return
+
+    document.add_heading("2.3 Conclusion experte", level=2)
+    document.add_paragraph(expert_conclusion)
 
 
 def _add_section_summary(document: Document, payload: dict[str, Any]) -> None:
@@ -384,6 +399,7 @@ def build_docx_report(
     document.add_page_break()
 
     _add_executive_summary(document, payload)
+    _add_expert_conclusion_section(document, payload)
     document.add_page_break()
 
     _add_section_summary(document, payload)

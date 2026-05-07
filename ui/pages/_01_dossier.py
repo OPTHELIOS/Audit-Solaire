@@ -7,7 +7,6 @@ from streamlit_folium import st_folium
 from services.audit_service import touch_audit
 from ui.state import get_audit, save_audit
 
-
 GEOCODER = Nominatim(user_agent="opthelios-audit-app")
 
 
@@ -75,271 +74,363 @@ def _build_map(latitude: float | None, longitude: float | None, label: str) -> f
     return m
 
 
-def render() -> None:
-    audit = get_audit()
+def _init_dossier_state(audit) -> None:
     projet = audit.projet
     adresse = projet.adresse
     contact_site = projet.contact_site
+
+    defaults = {
+        "dossier_operation": _safe_str(projet.operation),
+        "dossier_maitre_ouvrage": _safe_str(projet.maitre_ouvrage),
+        "dossier_exploitant": _safe_str(projet.exploitant),
+        "dossier_mainteneur": _safe_str(projet.mainteneur),
+        "dossier_ligne_1": _safe_str(adresse.ligne_1),
+        "dossier_ligne_2": _safe_str(adresse.ligne_2),
+        "dossier_code_postal": _safe_str(adresse.code_postal),
+        "dossier_commune": _safe_str(adresse.commune),
+        "dossier_departement": _safe_str(adresse.departement),
+        "dossier_pays": _safe_str(adresse.pays, "France") or "France",
+        "dossier_latitude": float(projet.latitude) if projet.latitude is not None else 0.0,
+        "dossier_longitude": float(projet.longitude) if projet.longitude is not None else 0.0,
+        "dossier_nom_contact": _safe_str(contact_site.nom),
+        "dossier_fonction_contact": _safe_str(contact_site.fonction),
+        "dossier_organisme_contact": _safe_str(contact_site.organisme),
+        "dossier_telephone_contact": _safe_str(contact_site.telephone),
+        "dossier_email_contact": _safe_str(contact_site.email),
+        "dossier_commentaires_generaux": _safe_str(projet.commentaires_generaux),
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _apply_pending_updates() -> None:
+    pending_pairs = [
+        ("dossier_pending_latitude", "dossier_latitude"),
+        ("dossier_pending_longitude", "dossier_longitude"),
+        ("dossier_pending_commune", "dossier_commune"),
+        ("dossier_pending_code_postal", "dossier_code_postal"),
+        ("dossier_pending_departement", "dossier_departement"),
+        ("dossier_pending_pays", "dossier_pays"),
+    ]
+
+    for pending_key, target_key in pending_pairs:
+        if pending_key in st.session_state:
+            st.session_state[target_key] = st.session_state[pending_key]
+            del st.session_state[pending_key]
+
+
+def _apply_session_to_audit(audit) -> None:
+    projet = audit.projet
+    adresse = projet.adresse
+    contact_site = projet.contact_site
+
+    projet.operation = st.session_state["dossier_operation"] or None
+    projet.maitre_ouvrage = st.session_state["dossier_maitre_ouvrage"] or None
+    projet.exploitant = st.session_state["dossier_exploitant"] or None
+    projet.mainteneur = st.session_state["dossier_mainteneur"] or None
+
+    adresse.ligne_1 = st.session_state["dossier_ligne_1"] or None
+    adresse.ligne_2 = st.session_state["dossier_ligne_2"] or None
+    adresse.code_postal = st.session_state["dossier_code_postal"] or None
+    adresse.commune = st.session_state["dossier_commune"] or None
+    adresse.departement = st.session_state["dossier_departement"] or None
+    adresse.pays = st.session_state["dossier_pays"] or "France"
+
+    latitude = st.session_state["dossier_latitude"]
+    longitude = st.session_state["dossier_longitude"]
+    projet.latitude = latitude if latitude != 0.0 else None
+    projet.longitude = longitude if longitude != 0.0 else None
+
+    contact_site.nom = st.session_state["dossier_nom_contact"] or None
+    contact_site.fonction = st.session_state["dossier_fonction_contact"] or None
+    contact_site.organisme = st.session_state["dossier_organisme_contact"] or None
+    contact_site.telephone = st.session_state["dossier_telephone_contact"] or None
+    contact_site.email = st.session_state["dossier_email_contact"] or None
+
+    projet.commentaires_generaux = st.session_state["dossier_commentaires_generaux"] or None
+
+
+def _save_dossier(audit) -> None:
+    _apply_session_to_audit(audit)
+
+    audit = touch_audit(audit)
+    save_audit(audit)
+
+    commune = st.session_state["dossier_commune"]
+    code_postal = st.session_state["dossier_code_postal"]
+    departement = st.session_state["dossier_departement"]
+    operation = st.session_state["dossier_operation"]
+    maitre_ouvrage = st.session_state["dossier_maitre_ouvrage"]
+    exploitant = st.session_state["dossier_exploitant"]
+    mainteneur = st.session_state["dossier_mainteneur"]
+
+    site_label_parts = [operation or "", commune or ""]
+    site_label = " - ".join([part for part in site_label_parts if part]).strip() or "Site non renseigné"
+
+    reference_parts = [
+        "AUDIT",
+        (commune or "").replace(" ", "_").upper(),
+        str(audit.updated_at.year) if getattr(audit, "updated_at", None) else "",
+    ]
+    reference = "-".join([part for part in reference_parts if part]) or "AUDIT-SOLAIRE"
+
+    st.session_state["audit_meta"] = {
+        "site_name": site_label,
+        "reference": reference,
+        "audit_date": "",
+        "nom_site": site_label,
+        "site": site_label,
+        "commune": commune or "",
+        "code_postal": code_postal or "",
+        "departement": departement or "",
+        "maitre_ouvrage": maitre_ouvrage or "",
+        "exploitant": exploitant or "",
+        "mainteneur": mainteneur or "",
+        "latitude": audit.projet.latitude or "",
+        "longitude": audit.projet.longitude or "",
+    }
+
+
+def _geocode_from_address() -> bool:
+    query = _build_search_query(
+        st.session_state["dossier_ligne_1"],
+        st.session_state["dossier_code_postal"],
+        st.session_state["dossier_commune"],
+        st.session_state["dossier_pays"],
+    )
+
+    result = _geocode_address(query)
+
+    if result is None:
+        st.warning("Aucune localisation trouvée à partir des informations saisies.")
+        return False
+
+    raw = result.raw.get("address", {})
+
+    st.session_state["dossier_pending_latitude"] = float(result.latitude)
+    st.session_state["dossier_pending_longitude"] = float(result.longitude)
+
+    if not st.session_state["dossier_commune"]:
+        st.session_state["dossier_pending_commune"] = (
+            raw.get("city") or raw.get("town") or raw.get("village") or ""
+        )
+
+    if not st.session_state["dossier_code_postal"]:
+        st.session_state["dossier_pending_code_postal"] = raw.get("postcode") or ""
+
+    if not st.session_state["dossier_departement"]:
+        st.session_state["dossier_pending_departement"] = _extract_department(
+            raw.get("postcode", ""),
+            raw.get("county", ""),
+        )
+
+    st.session_state["dossier_pending_pays"] = raw.get(
+        "country",
+        st.session_state["dossier_pays"] or "France",
+    )
+
+    return True
+
+
+def _reverse_from_coordinates() -> bool:
+    latitude = st.session_state["dossier_latitude"]
+    longitude = st.session_state["dossier_longitude"]
+
+    if latitude == 0.0 and longitude == 0.0:
+        st.warning("Renseigne d'abord des coordonnées GPS valides.")
+        return False
+
+    result = _reverse_geocode(latitude, longitude)
+
+    if result is None:
+        st.warning("Aucune adresse trouvée à partir de ces coordonnées.")
+        return False
+
+    raw = result.raw.get("address", {})
+
+    st.session_state["dossier_pending_commune"] = (
+        raw.get("city") or raw.get("town") or raw.get("village") or st.session_state["dossier_commune"]
+    )
+    st.session_state["dossier_pending_code_postal"] = (
+        raw.get("postcode") or st.session_state["dossier_code_postal"]
+    )
+    st.session_state["dossier_pending_departement"] = (
+        _extract_department(raw.get("postcode", ""), raw.get("county", ""))
+        or st.session_state["dossier_departement"]
+    )
+    st.session_state["dossier_pending_pays"] = (
+        raw.get("country") or st.session_state["dossier_pays"] or "France"
+    )
+
+    return True
+
+
+def render() -> None:
+    audit = get_audit()
+    _init_dossier_state(audit)
+    _apply_pending_updates()
 
     st.header("01 - Dossier")
     st.caption("Identification du projet, localisation, acteurs et informations générales du site.")
 
     st.subheader("Identification du projet")
 
-    operation = st.text_input(
+    st.text_input(
         "Nom de l'opération",
-        value=_safe_str(projet.operation),
+        key="dossier_operation",
         placeholder="Ex. Résidence Les Chênes - Audit installation solaire thermique",
     )
 
-    maitre_ouvrage = st.text_input(
+    st.text_input(
         "Maître d'ouvrage",
-        value=_safe_str(projet.maitre_ouvrage),
+        key="dossier_maitre_ouvrage",
         placeholder="Nom du maître d'ouvrage",
     )
 
-    exploitant = st.text_input(
+    st.text_input(
         "Exploitant",
-        value=_safe_str(projet.exploitant),
+        key="dossier_exploitant",
         placeholder="Nom de l'exploitant",
     )
 
-    mainteneur = st.text_input(
+    st.text_input(
         "Mainteneur",
-        value=_safe_str(projet.mainteneur),
+        key="dossier_mainteneur",
         placeholder="Nom de l'entreprise de maintenance",
     )
 
     st.subheader("Adresse du site")
 
-    ligne_1 = st.text_input(
+    st.text_input(
         "Adresse - ligne 1",
-        value=_safe_str(adresse.ligne_1),
+        key="dossier_ligne_1",
         placeholder="Ex. 12 rue de la Gare",
     )
 
-    ligne_2 = st.text_input(
+    st.text_input(
         "Adresse - ligne 2",
-        value=_safe_str(adresse.ligne_2),
+        key="dossier_ligne_2",
         placeholder="Complément d'adresse",
     )
 
     col_cp, col_commune, col_dept = st.columns(3)
 
     with col_cp:
-        code_postal = st.text_input(
+        st.text_input(
             "Code postal",
-            value=_safe_str(adresse.code_postal),
+            key="dossier_code_postal",
             placeholder="56390",
         )
 
     with col_commune:
-        commune = st.text_input(
+        st.text_input(
             "Commune",
-            value=_safe_str(adresse.commune),
+            key="dossier_commune",
             placeholder="Grand-Champ",
         )
 
     with col_dept:
-        departement = st.text_input(
+        st.text_input(
             "Département",
-            value=_safe_str(adresse.departement),
+            key="dossier_departement",
             placeholder="Morbihan",
         )
 
-    pays = st.text_input(
+    st.text_input(
         "Pays",
-        value=_safe_str(adresse.pays, "France") or "France",
+        key="dossier_pays",
     )
+
+    map_label = st.session_state["dossier_operation"] or st.session_state["dossier_commune"] or "Site audité"
+    map_lat = st.session_state["dossier_latitude"] if st.session_state["dossier_latitude"] != 0.0 else None
+    map_lon = st.session_state["dossier_longitude"] if st.session_state["dossier_longitude"] != 0.0 else None
+
+    dossier_map = _build_map(map_lat, map_lon, map_label)
+    st_folium(dossier_map, width="100%", height=420)
 
     st.subheader("Géolocalisation")
 
     col_lat, col_lon = st.columns(2)
 
     with col_lat:
-        latitude = st.number_input(
+        st.number_input(
             "Latitude",
             min_value=-90.0,
             max_value=90.0,
-            value=float(projet.latitude or 0.0),
             step=0.000001,
             format="%.6f",
+            key="dossier_latitude",
         )
 
     with col_lon:
-        longitude = st.number_input(
+        st.number_input(
             "Longitude",
             min_value=-180.0,
             max_value=180.0,
-            value=float(projet.longitude or 0.0),
             step=0.000001,
             format="%.6f",
+            key="dossier_longitude",
         )
 
     col_geo1, col_geo2 = st.columns(2)
 
     with col_geo1:
         if st.button("Localiser à partir de l'adresse", use_container_width=True):
-            query = _build_search_query(ligne_1, code_postal, commune, pays)
-            result = _geocode_address(query)
-
-            if result is None:
-                st.warning("Aucune localisation trouvée à partir des informations saisies.")
-            else:
-                raw = result.raw.get("address", {})
-                projet.latitude = float(result.latitude)
-                projet.longitude = float(result.longitude)
-
-                if not commune:
-                    adresse.commune = raw.get("city") or raw.get("town") or raw.get("village") or ""
-                else:
-                    adresse.commune = commune
-
-                if not code_postal:
-                    adresse.code_postal = raw.get("postcode") or ""
-                else:
-                    adresse.code_postal = code_postal
-
-                if not departement:
-                    adresse.departement = _extract_department(
-                        raw.get("postcode", ""),
-                        raw.get("county", ""),
-                    )
-                else:
-                    adresse.departement = departement
-
-                adresse.pays = raw.get("country", pays or "France")
-                save_audit(touch_audit(audit))
-                st.success("Localisation trouvée et coordonnées mises à jour.")
+            if _geocode_from_address():
                 st.rerun()
 
     with col_geo2:
         if st.button("Compléter depuis les coordonnées GPS", use_container_width=True):
-            if latitude == 0.0 and longitude == 0.0:
-                st.warning("Renseigne d'abord des coordonnées GPS valides.")
-            else:
-                result = _reverse_geocode(latitude, longitude)
-                if result is None:
-                    st.warning("Aucune adresse trouvée à partir de ces coordonnées.")
-                else:
-                    raw = result.raw.get("address", {})
-                    projet.latitude = latitude
-                    projet.longitude = longitude
-                    adresse.commune = raw.get("city") or raw.get("town") or raw.get("village") or commune
-                    adresse.code_postal = raw.get("postcode") or code_postal
-                    adresse.departement = _extract_department(
-                        raw.get("postcode", ""),
-                        raw.get("county", ""),
-                    ) or departement
-                    adresse.pays = raw.get("country") or pays or "France"
-
-                    save_audit(touch_audit(audit))
-                    st.success("Adresse mise à jour depuis les coordonnées GPS.")
-                    st.rerun()
-
-    map_label = operation or commune or "Site audité"
-    map_lat = projet.latitude if projet.latitude is not None else (latitude if latitude != 0.0 else None)
-    map_lon = projet.longitude if projet.longitude is not None else (longitude if longitude != 0.0 else None)
-
-    dossier_map = _build_map(map_lat, map_lon, map_label)
-    st_folium(dossier_map, width="100%", height=420)
+            if _reverse_from_coordinates():
+                st.rerun()
 
     st.subheader("Contact sur site")
 
-    nom_contact = st.text_input(
+    st.text_input(
         "Nom du contact",
-        value=_safe_str(contact_site.nom),
+        key="dossier_nom_contact",
         placeholder="Nom et prénom",
     )
 
-    fonction_contact = st.text_input(
+    st.text_input(
         "Fonction",
-        value=_safe_str(contact_site.fonction),
+        key="dossier_fonction_contact",
         placeholder="Ex. Responsable technique",
     )
 
-    organisme_contact = st.text_input(
+    st.text_input(
         "Organisme",
-        value=_safe_str(contact_site.organisme),
+        key="dossier_organisme_contact",
         placeholder="Ex. Syndic / Exploitant / Client",
     )
 
     col_tel, col_email = st.columns(2)
 
     with col_tel:
-        telephone_contact = st.text_input(
+        st.text_input(
             "Téléphone",
-            value=_safe_str(contact_site.telephone),
+            key="dossier_telephone_contact",
             placeholder="Ex. 06 00 00 00 00",
         )
 
     with col_email:
-        email_contact = st.text_input(
+        st.text_input(
             "Email",
-            value=_safe_str(contact_site.email),
+            key="dossier_email_contact",
             placeholder="Ex. contact@exemple.fr",
         )
 
     st.subheader("Commentaires généraux")
 
-    commentaires_generaux = st.text_area(
+    st.text_area(
         "Commentaires",
-        value=_safe_str(projet.commentaires_generaux),
+        key="dossier_commentaires_generaux",
         placeholder="Contexte du dossier, remarques d'accès, informations générales utiles à l'audit...",
         height=120,
     )
 
     if st.button("Enregistrer le dossier", type="primary"):
-        projet.operation = operation or None
-        projet.maitre_ouvrage = maitre_ouvrage or None
-        projet.exploitant = exploitant or None
-        projet.mainteneur = mainteneur or None
-
-        adresse.ligne_1 = ligne_1 or None
-        adresse.ligne_2 = ligne_2 or None
-        adresse.code_postal = code_postal or None
-        adresse.commune = commune or None
-        adresse.departement = departement or None
-        adresse.pays = pays or "France"
-
-        projet.latitude = latitude if latitude != 0.0 else None
-        projet.longitude = longitude if longitude != 0.0 else None
-
-        contact_site.nom = nom_contact or None
-        contact_site.fonction = fonction_contact or None
-        contact_site.organisme = organisme_contact or None
-        contact_site.telephone = telephone_contact or None
-        contact_site.email = email_contact or None
-
-        projet.commentaires_generaux = commentaires_generaux or None
-
-        audit = touch_audit(audit)
-        save_audit(audit)
-
-        site_label_parts = [operation or "", commune or ""]
-        site_label = " - ".join([part for part in site_label_parts if part]).strip() or "Site non renseigné"
-
-        reference_parts = [
-            "AUDIT",
-            (commune or "").replace(" ", "_").upper(),
-            str(audit.updated_at.year) if getattr(audit, "updated_at", None) else "",
-        ]
-        reference = "-".join([part for part in reference_parts if part]) or "AUDIT-SOLAIRE"
-
-        st.session_state["audit_meta"] = {
-            "site_name": site_label,
-            "reference": reference,
-            "audit_date": "",
-            "nom_site": site_label,
-            "site": site_label,
-            "commune": commune or "",
-            "code_postal": code_postal or "",
-            "departement": departement or "",
-            "maitre_ouvrage": maitre_ouvrage or "",
-            "exploitant": exploitant or "",
-            "mainteneur": mainteneur or "",
-            "latitude": projet.latitude or "",
-            "longitude": projet.longitude or "",
-        }
-
+        _save_dossier(audit)
         st.success("Dossier enregistré.")

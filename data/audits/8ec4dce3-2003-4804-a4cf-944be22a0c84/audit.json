@@ -1,0 +1,201 @@
+{
+  "meta": {
+    "audit_id": "8ec4dce3-2003-4804-a4cf-944be22a0c84",
+    "numero_audit": "AUD-20260408-D24DEB2B",
+    "date_audit": "2026-04-08",
+    "date_creation": "2026-04-08T07:21:48.396448",
+    "date_modification": "2026-04-08T07:23:28.983699",
+    "auditeur": "",
+    "entreprise": "OPT'HELIOS",
+    "statut": "brouillon",
+    "version_modele": "v1"
+  },
+  "projet": {
+    "operation": "",
+    "moa": "",
+    "exploitant": "",
+    "contact_site": "",
+    "adresse": {
+      "ligne_1": "",
+      "ligne_2": "",
+      "code_postal": "",
+      "commune": "",
+      "pays": "France"
+    },
+    "gps": {
+      "latitude": null,
+      "longitude": null
+    },
+    "photo_couverture_path": null
+  },
+  "installation": {
+    "type_installation": null,
+    "usage_principal": null,
+    "annee_mise_en_service": null,
+    "description_generale": null,
+    "schema_hydraulique_disponible": false,
+    "schema_electrique_disponible": false,
+    "analyse_fonctionnelle_disponible": false,
+    "telegestion_presente": false
+  },
+  "constats": [
+    {
+      "controle_id": "DOC_001",
+      "lot": "documentation",
+      "section": "Documentation",
+      "libelle": "Présence et conformité du schéma d'exécution",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "majeure",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Réduit la maintenabilité et la capacité de diagnostic.",
+      "recommandation": "Fournir ou mettre à jour le schéma d'exécution.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "DOC_002",
+      "lot": "electricite",
+      "section": "Électricité",
+      "libelle": "Présence et conformité du schéma électrique",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "majeure",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Limite l'exploitation et le dépannage de l'installation.",
+      "recommandation": "Compléter ou corriger le schéma électrique.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "CAP_001",
+      "lot": "capteurs",
+      "section": "Champ capteurs / toiture",
+      "libelle": "Supports capteurs conformes et fixés",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "critique",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Risque mécanique et atteinte à la sécurité de l'installation.",
+      "recommandation": "Reprendre la fixation et vérifier la conformité des supports.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "HYD_001",
+      "lot": "hydraulique",
+      "section": "Hydraulique solaire",
+      "libelle": "Circulation capteurs / échangeur dans le bon sens",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "critique",
+      "verdict": "defaut",
+      "observation": "",
+      "impact": "Altération majeure du fonctionnement thermique.",
+      "recommandation": "Corriger le sens de circulation hydraulique.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "HYD_004",
+      "lot": "securite",
+      "section": "Hydraulique solaire",
+      "libelle": "Présence d'une soupape de sécurité conforme",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "critique",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Risque de surpression et défaut de sécurité.",
+      "recommandation": "Installer ou remplacer la soupape de sécurité conforme.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "EXP_001",
+      "lot": "expansion",
+      "section": "Système d'expansion",
+      "libelle": "Vase d'expansion dimensionné et adapté",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "critique",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Instabilité hydraulique et risque de dysfonctionnement majeur.",
+      "recommandation": "Vérifier et corriger le dimensionnement du vase d'expansion.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "STO_001",
+      "lot": "echangeur_stockage",
+      "section": "Échangeur / stockage",
+      "libelle": "Échangeur raccordé en contre-courant",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "majeure",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Échange thermique dégradé.",
+      "recommandation": "Revoir le raccordement de l'échangeur.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "ECS_001",
+      "lot": "ecs_bouclage",
+      "section": "Distribution ECS / bouclage",
+      "libelle": "Mitigeur thermostatique présent",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "majeure",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Risque de non-maîtrise de la température d'ECS.",
+      "recommandation": "Installer un mitigeur thermostatique adapté.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "MET_001",
+      "lot": "metrologie",
+      "section": "Métrologie / tests",
+      "libelle": "Manomètre de contrôle du circuit solaire présent",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "majeure",
+      "verdict": "non_renseigne",
+      "observation": "",
+      "impact": "Suivi hydraulique insuffisant.",
+      "recommandation": "Installer un manomètre de contrôle fiable et accessible.",
+      "preuves_ids": []
+    },
+    {
+      "controle_id": "CPT_001",
+      "lot": "compteurs",
+      "section": "Compteurs énergétiques",
+      "libelle": "Compteur d'énergie solaire ESU présent et exploitable",
+      "reference": "Référentiel interne OPT'HELIOS",
+      "criticite_par_defaut": "majeure",
+      "verdict": "defaut",
+      "observation": "",
+      "impact": "Production solaire non quantifiable.",
+      "recommandation": "Installer ou remettre en service le compteur ESU.",
+      "preuves_ids": []
+    }
+  ],
+  "preuves": [
+    {
+      "preuve_id": "a7e66f6b-5964-42f7-ab97-02bf6e8cca2b",
+      "type_preuve": "document",
+      "fichier_path": "data\\audits\\8ec4dce3-2003-4804-a4cf-944be22a0c84\\evidences\\documents\\a7e66f6b-5964-42f7-ab97-02bf6e8cca2b.pdf",
+      "nom_original": "ATec 14.4_13-1905_V2.pdf",
+      "legende": "Atec",
+      "section": null,
+      "controle_id": null,
+      "date_capture": "2026-04-08T07:22:55.008611",
+      "auteur": null
+    }
+  ],
+  "actions_correctives": [],
+  "synthese": {
+    "nb_controles_total": 10,
+    "nb_conformes": 0,
+    "nb_defauts": 2,
+    "nb_non_controlables": 0,
+    "nb_sans_objet": 0,
+    "nb_non_renseignes": 8,
+    "nb_preuves": 1,
+    "score_global_sur_100": 0.0,
+    "score_completude_sur_100": 20.0,
+    "niveau_risque": "modéré",
+    "resume_executif": "L'audit comporte 10 contrôles, dont 0 conformes, 2 défauts, 0 non contrôlables, 0 sans objet et 8 non renseignés.",
+    "conclusion_expert": null
+  }
+}

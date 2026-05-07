@@ -52,6 +52,27 @@ def _get_context_from_session() -> dict[str, Any]:
     }
 
 
+def _has_active_audit() -> bool:
+    return st.session_state.get("audit") is not None
+
+
+def _render_missing_audit_state() -> None:
+    st.title(PAGE_TITLE)
+    st.warning("Aucun audit actif n’est chargé dans la session.")
+    st.info(
+        "Commence par créer un dossier d’audit ou recharger un audit existant depuis la page Dossier / Infos audit."
+    )
+
+
+def _init_ui_state() -> None:
+    if "controls_open_section" not in st.session_state:
+        st.session_state["controls_open_section"] = None
+    if "controls_last_saved" not in st.session_state:
+        st.session_state["controls_last_saved"] = ""
+    if "controls_last_reset" not in st.session_state:
+        st.session_state["controls_last_reset"] = ""
+
+
 def _render_header(context: dict[str, Any]) -> None:
     st.title(PAGE_TITLE)
     st.caption(
@@ -227,7 +248,7 @@ def _render_existing_evidences(response: Any) -> None:
             st.code(path, language="text")
 
 
-def _render_control_form(control_item: Any, response: Any, context: dict[str, Any]) -> None:
+def _render_control_form(control_item: Any, response: Any, context: dict[str, Any], section: str) -> None:
     verdict_default = response.verdict.value if response.verdict else ""
     criticite_default = response.criticite_finale.value
 
@@ -294,49 +315,53 @@ def _render_control_form(control_item: Any, response: Any, context: dict[str, An
         save_clicked = c1.form_submit_button("Enregistrer", use_container_width=True)
         reset_clicked = c2.form_submit_button("Réinitialiser", use_container_width=True)
 
-    if reset_clicked:
-        reset_response(
-            st.session_state,
-            control_item.controle_id,
-            contexte_technique=context,
-        )
-        _clear_form_keys(control_item.controle_id)
-        st.success(f"Contrôle {control_item.controle_id} réinitialisé.")
-        st.rerun()
-
-    if save_clicked:
-        try:
-            saved_paths = append_uploaded_evidences(
-                uploaded_files or [],
-                controle_id=control_item.controle_id,
-                session_state=st.session_state,
-                existing_paths=response.photos,
-                base_dir="data/evidences",
-            )
-
-            update_response(
+        if reset_clicked:
+            reset_response(
                 st.session_state,
                 control_item.controle_id,
-                verdict=verdict or None,
-                observation=observation,
-                criticite_finale=criticite_finale,
-                recommandation_personnalisee=recommandation,
-                preuve_documentaire=preuve_documentaire,
-                photos=saved_paths,
-                non_verifiable_raison=non_verifiable_raison,
+                contexte_technique=context,
             )
-
             _clear_form_keys(control_item.controle_id)
-            st.success(f"Contrôle {control_item.controle_id} enregistré.")
+            st.session_state["controls_open_section"] = section
+            st.session_state["controls_last_reset"] = control_item.controle_id
+            st.success(f"Contrôle {control_item.controle_id} réinitialisé.")
             st.rerun()
 
-        except ControlServiceError as exc:
-            st.error(str(exc))
-        except Exception as exc:
-            st.error(f"Erreur lors de l’enregistrement : {exc}")
+        if save_clicked:
+            try:
+                saved_paths = append_uploaded_evidences(
+                    uploaded_files or [],
+                    controle_id=control_item.controle_id,
+                    session_state=st.session_state,
+                    existing_paths=response.photos,
+                    base_dir="data/evidences",
+                )
 
-    _render_existing_evidences(response)
-    _render_control_help(control_item)
+                update_response(
+                    st.session_state,
+                    control_item.controle_id,
+                    verdict=verdict or None,
+                    observation=observation,
+                    criticite_finale=criticite_finale,
+                    recommandation_personnalisee=recommandation,
+                    preuve_documentaire=preuve_documentaire,
+                    photos=saved_paths,
+                    non_verifiable_raison=non_verifiable_raison,
+                )
+
+                _clear_form_keys(control_item.controle_id)
+                st.session_state["controls_open_section"] = section
+                st.session_state["controls_last_saved"] = control_item.controle_id
+                st.success(f"Contrôle {control_item.controle_id} enregistré.")
+                st.rerun()
+
+            except ControlServiceError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"Erreur lors de l’enregistrement : {exc}")
+
+        _render_existing_evidences(response)
+        _render_control_help(control_item)
 
 
 def _render_section(
@@ -356,16 +381,21 @@ def _render_section(
     )
     missing_count = sum(1 for row in visible_rows if row["response"].verdict is None)
 
+    should_expand = (
+        filters["selected_section"] == section
+        or st.session_state.get("controls_open_section") == section
+    )
+
     with st.expander(
         f"{section} — {len(visible_rows)} point(s), {nc_count} écart(s), {missing_count} non renseigné(s)",
-        expanded=False,
+        expanded=should_expand,
     ):
         for idx, row in enumerate(visible_rows, start=1):
             control_item = row["control"]
             response = row["response"]
 
             st.markdown(f"## Point {idx}")
-            _render_control_form(control_item, response, context)
+            _render_control_form(control_item, response, context, section)
 
             if idx < len(visible_rows):
                 st.markdown("---")
@@ -387,11 +417,31 @@ def _render_action_plan_preview(context: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    _init_ui_state()
+
+    if not _has_active_audit():
+        _render_missing_audit_state()
+        return
+
     context = _get_context_from_session()
-    ensure_control_state(st.session_state, contexte_technique=context)
+
+    try:
+        ensure_control_state(st.session_state, contexte_technique=context)
+    except ControlServiceError as exc:
+        st.title(PAGE_TITLE)
+        st.error(str(exc))
+        return
 
     _render_header(context)
     _render_top_summary(context)
+
+    if st.session_state.get("controls_last_saved"):
+        st.success(f"Dernier contrôle enregistré : {st.session_state['controls_last_saved']}")
+        st.session_state["controls_last_saved"] = ""
+
+    if st.session_state.get("controls_last_reset"):
+        st.info(f"Dernier contrôle réinitialisé : {st.session_state['controls_last_reset']}")
+        st.session_state["controls_last_reset"] = ""
 
     filters = _render_sidebar(context)
     sections = filters["sections"]
@@ -411,9 +461,9 @@ def main() -> None:
     _render_action_plan_preview(context)
 
 
-if __name__ == "__main__":
+def render() -> None:
     main()
 
 
-def render() -> None:
+if __name__ == "__main__":
     main()

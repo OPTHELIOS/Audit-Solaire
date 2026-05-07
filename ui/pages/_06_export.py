@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +10,7 @@ from domain.docx_service import build_docx_report
 from domain.report_service import build_report_data, build_report_markdown
 
 PAGE_TITLE = "06 - Export du rapport"
+SESSION_CONCLUSION_KEY = "synthese_conclusion_expert"
 
 
 def _get_context_from_session() -> dict[str, Any]:
@@ -21,31 +21,51 @@ def _get_context_from_session() -> dict[str, Any]:
     return {
         "systeme_capteurs": installation.get("systeme_capteurs"),
         "type_echangeur": installation.get("type_echangeur"),
-        "type_stockage_solaire": installation.get("type_stockage_solaire"),
+        "type_stockage_solaire": (
+            installation.get("type_stockage_solaire")
+            or installation.get("type_stockage")
+        ),
         "type_comptage": installation.get("type_comptage", []),
         "requires_monitoring": bool(installation.get("requires_monitoring", False)),
         "requires_telecontrole": bool(installation.get("requires_telecontrole", False)),
     }
 
 
-def _get_export_metadata() -> dict[str, str]:
+def _get_export_metadata(payload: dict[str, Any] | None = None) -> dict[str, str]:
+    payload_metadata = {}
+    if isinstance(payload, dict):
+        payload_metadata = payload.get("metadata", {}) or {}
+        if not isinstance(payload_metadata, dict):
+            payload_metadata = {}
+
     audit_meta = st.session_state.get("audit_meta", {})
     if not isinstance(audit_meta, dict):
         audit_meta = {}
 
     site_name = (
-        audit_meta.get("site_name")
+        payload_metadata.get("site_name")
+        or audit_meta.get("site_name")
         or audit_meta.get("site")
         or audit_meta.get("nom_site")
+        or audit_meta.get("operation")
         or "Site non renseigné"
     )
+
     reference = (
-        audit_meta.get("reference")
+        payload_metadata.get("reference")
+        or audit_meta.get("reference")
+        or audit_meta.get("numero_audit")
         or audit_meta.get("audit_id")
         or audit_meta.get("site_slug")
         or "AUDIT-SOLAIRE"
     )
-    audit_date = audit_meta.get("audit_date") or ""
+
+    audit_date = (
+        payload_metadata.get("audit_date")
+        or audit_meta.get("audit_date")
+        or audit_meta.get("date_audit")
+        or ""
+    )
 
     return {
         "site_name": str(site_name),
@@ -72,29 +92,219 @@ def _render_header(meta: dict[str, str]) -> None:
 
 
 def _render_payload_overview(payload: dict[str, Any]) -> None:
-    ga = payload["global_assessment"]
-    counts = payload["counts"]
+    ga = payload.get("global_assessment", {})
+    counts = payload.get("counts", {})
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Statut global", ga["statut_global"])
-    c2.metric("Constats", counts["total_findings"])
-    c3.metric("Actions", counts["total_actions"])
-    c4.metric("Critiques", counts["critical_findings"])
+    c1.metric("Statut global", ga.get("statut_global", "-"))
+    c2.metric("Constats", counts.get("total_findings", 0))
+    c3.metric("Actions", counts.get("total_actions", 0))
+    c4.metric("Critiques", counts.get("critical_findings", 0))
 
 
-def _render_markdown_export(payload: dict[str, Any], context: dict[str, Any], base_name: str) -> None:
+def _build_export_checklist(
+    meta: dict[str, str],
+    payload: dict[str, Any],
+) -> list[tuple[str, bool, str]]:
+    ga = payload.get("global_assessment", {})
+    counts = payload.get("counts", {})
+    metadata = payload.get("metadata", {}) or {}
+    installation_context = st.session_state.get("installation_context", {})
+    expert_conclusion = st.session_state.get(SESSION_CONCLUSION_KEY, "")
+
+    return [
+        (
+            "Site renseigné",
+            bool(meta["site_name"] and meta["site_name"] != "Site non renseigné"),
+            "Le nom du site ou de l'opération doit être identifiable dans le livrable.",
+        ),
+        (
+            "Référence audit renseignée",
+            bool(meta["reference"] and meta["reference"] != "AUDIT-SOLAIRE"),
+            "Une référence claire évite les confusions de version et de diffusion.",
+        ),
+        (
+            "Installation qualifiée",
+            bool(isinstance(installation_context, dict) and installation_context),
+            "Le contexte technique doit être présent pour que le rapport soit cohérent.",
+        ),
+        (
+            "Constats présents",
+            counts.get("total_findings", 0) > 0,
+            "Un rapport vide ou quasi vide doit être évité.",
+        ),
+        (
+            "Audit suffisamment complété",
+            ga.get("taux_completion_pct", 0) >= 80,
+            "Sous 80 %, le rapport risque d’être interprété comme incomplet ou provisoire.",
+        ),
+        (
+            "Conclusion experte disponible",
+            bool(str(expert_conclusion).strip())
+            or bool(str(ga.get("commentaire_global", "")).strip()),
+            "Une conclusion éditorialisée améliore fortement la lisibilité du livrable.",
+        ),
+        (
+            "Métadonnées exportables",
+            bool(metadata),
+            "Le service de rapport doit produire des métadonnées minimales pour fiabiliser le livrable.",
+        ),
+    ]
+
+
+def _render_export_checklist(meta: dict[str, str], payload: dict[str, Any]) -> None:
+    st.subheader("Vérification avant export")
+
+    checklist = _build_export_checklist(meta, payload)
+    cols = st.columns(len(checklist))
+
+    for col, (label, ok, _) in zip(cols, checklist):
+        if ok:
+            col.success(label)
+        else:
+            col.warning(label)
+
+    with st.expander("Détail des contrôles", expanded=False):
+        for label, ok, help_text in checklist:
+            icon = "✅" if ok else "⚠️"
+            st.write(f"{icon} **{label}**")
+            st.caption(help_text)
+
+    if all(ok for _, ok, _ in checklist):
+        st.success("Le dossier paraît prêt pour une génération de rapport exploitable.")
+    else:
+        st.info("Le rapport peut être généré, mais il est préférable de consolider les points signalés.")
+
+
+def _get_export_profile_defaults(profile: str) -> dict[str, Any]:
+    profiles = {
+        "brouillon_interne": {
+            "label": "Brouillon interne",
+            "include_evidences": True,
+            "report_title": "Brouillon interne - Rapport d’audit technique solaire thermique",
+        },
+        "version_client": {
+            "label": "Version client",
+            "include_evidences": False,
+            "report_title": "Rapport d’audit technique solaire thermique",
+        },
+        "version_complete": {
+            "label": "Version complète avec annexes",
+            "include_evidences": True,
+            "report_title": "Rapport complet d’audit technique solaire thermique",
+        },
+    }
+    return profiles[profile]
+
+
+def _render_docx_export(
+    meta: dict[str, str],
+    context: dict[str, Any],
+    base_name: str,
+    payload: dict[str, Any],
+) -> None:
+    st.subheader("Export DOCX")
+
+    profile = st.selectbox(
+        "Profil de livrable",
+        options=["brouillon_interne", "version_client", "version_complete"],
+        format_func=lambda p: _get_export_profile_defaults(p)["label"],
+        index=2,
+    )
+    profile_defaults = _get_export_profile_defaults(profile)
+
+    ga = payload.get("global_assessment", {})
+    counts = payload.get("counts", {})
+
+    with st.expander("Résumé du livrable", expanded=True):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Statut", ga.get("statut_global", "-"))
+        c2.metric("Complétion", f"{ga.get('taux_completion_pct', 0)} %")
+        c3.metric("Constats", counts.get("total_findings", 0))
+        c4.metric("Actions", counts.get("total_actions", 0))
+
+    with st.form("docx_export_form", clear_on_submit=False):
+        report_title = st.text_input("Titre du rapport", value=profile_defaults["report_title"])
+        site_name = st.text_input("Nom du site", value=meta["site_name"])
+        reference = st.text_input("Référence audit", value=meta["reference"])
+        audit_date = st.text_input(
+            "Date d’audit",
+            value=meta["audit_date"],
+            placeholder="Ex. 08/04/2026",
+        )
+        include_evidences = st.checkbox(
+            "Intégrer les preuves images disponibles",
+            value=profile_defaults["include_evidences"],
+        )
+
+        submitted = st.form_submit_button("Générer le DOCX", use_container_width=True)
+
+    if not submitted:
+        return
+
+    errors = []
+    if not report_title.strip():
+        errors.append("Le titre du rapport est obligatoire.")
+    if not site_name.strip():
+        errors.append("Le nom du site est obligatoire.")
+    if not reference.strip():
+        errors.append("La référence audit est obligatoire.")
+
+    if errors:
+        for error in errors:
+            st.error(error)
+        return
+
+    try:
+        with st.spinner("Génération du rapport Word en cours...", show_time=True):
+            output_dir = Path("output")
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            output_path = output_dir / f"{base_name}_{profile}.docx"
+
+            generated_path = build_docx_report(
+                st.session_state,
+                output_path=output_path,
+                contexte_technique=context,
+                report_title=report_title.strip(),
+                site_name=site_name.strip(),
+                reference=reference.strip(),
+                audit_date=audit_date.strip() or None,
+                include_evidences=include_evidences,
+            )
+
+            with open(generated_path, "rb") as f:
+                docx_bytes = f.read()
+
+        st.success("Rapport DOCX généré.")
+
+        st.download_button(
+            label="Télécharger le rapport DOCX",
+            data=docx_bytes,
+            file_name=Path(generated_path).name,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            width="stretch",
+            help="Le fichier est généré à la demande puis proposé au téléchargement.",
+        )
+
+    except Exception as exc:
+        st.error(f"Erreur lors de la génération du DOCX : {exc}")
+
+
+def _render_markdown_export(context: dict[str, Any], base_name: str) -> None:
     st.subheader("Export Markdown")
 
-    markdown_text = build_report_markdown(
-        st.session_state,
-        contexte_technique=context,
-    )
+    try:
+        markdown_text = build_report_markdown(
+            st.session_state,
+            contexte_technique=context,
+        )
+    except Exception as exc:
+        st.error(f"Erreur lors de la génération Markdown : {exc}")
+        return
 
-    st.text_area(
-        "Aperçu Markdown",
-        value=markdown_text,
-        height=320,
-    )
+    with st.expander("Aperçu Markdown", expanded=True):
+        st.text_area("Contenu Markdown", value=markdown_text, height=320)
 
     st.download_button(
         label="Télécharger le rapport Markdown",
@@ -110,11 +320,8 @@ def _render_json_export(payload: dict[str, Any], base_name: str) -> None:
 
     json_text = json.dumps(payload, ensure_ascii=False, indent=2)
 
-    st.text_area(
-        "Aperçu JSON",
-        value=json_text[:10000],
-        height=320,
-    )
+    with st.expander("Aperçu JSON", expanded=False):
+        st.text_area("Contenu JSON", value=json_text[:10000], height=320)
 
     st.download_button(
         label="Télécharger l'export JSON",
@@ -122,91 +329,40 @@ def _render_json_export(payload: dict[str, Any], base_name: str) -> None:
         file_name=f"{base_name}.json",
         mime="application/json",
         width="stretch",
-    )
-
-
-def _render_docx_export(meta: dict[str, str], context: dict[str, Any], base_name: str) -> None:
-    st.subheader("Export DOCX")
-
-    with st.form("docx_export_form", clear_on_submit=False):
-        report_title = st.text_input(
-            "Titre du rapport",
-            value="Rapport d’audit technique solaire thermique",
-        )
-        site_name = st.text_input(
-            "Nom du site",
-            value=meta["site_name"],
-        )
-        reference = st.text_input(
-            "Référence audit",
-            value=meta["reference"],
-        )
-        audit_date = st.text_input(
-            "Date d’audit",
-            value=meta["audit_date"],
-            placeholder="Ex. 08/04/2026",
-        )
-        include_evidences = st.checkbox(
-            "Intégrer les preuves images disponibles",
-            value=True,
-        )
-
-        submitted = st.form_submit_button("Générer le DOCX", use_container_width=True)
-
-    if not submitted:
-        return
-
-    with st.spinner("Génération du rapport Word en cours...", show_time=True):
-        output_dir = Path("output")
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        output_path = output_dir / f"{base_name}.docx"
-
-        generated_path = build_docx_report(
-            st.session_state,
-            output_path=output_path,
-            contexte_technique=context,
-            report_title=report_title,
-            site_name=site_name,
-            reference=reference,
-            audit_date=audit_date or None,
-            include_evidences=include_evidences,
-        )
-
-        with open(generated_path, "rb") as f:
-            docx_bytes = f.read()
-
-    st.success("Rapport DOCX généré.")
-
-    st.download_button(
-        label="Télécharger le rapport DOCX",
-        data=docx_bytes,
-        file_name=generated_path.name,
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        width="stretch",
+        help="Export technique utile pour contrôle qualité, archivage ou reprise de données.",
     )
 
 
 def main() -> None:
     context = _get_context_from_session()
-    meta = _get_export_metadata()
-    payload = build_report_data(st.session_state, contexte_technique=context)
 
+    try:
+        payload = build_report_data(st.session_state, contexte_technique=context)
+    except Exception as exc:
+        st.title(PAGE_TITLE)
+        st.error(f"Impossible de construire les données de rapport : {exc}")
+        return
+
+    meta = _get_export_metadata(payload)
     base_name = _safe_filename(f"{meta['reference']}_rapport_audit_technique")
 
     _render_header(meta)
     _render_payload_overview(payload)
+    _render_export_checklist(meta, payload)
 
-    tab1, tab2, tab3 = st.tabs(["Markdown", "JSON", "DOCX"])
+    tab1, tab2 = st.tabs(["Livrable DOCX", "Exports techniques"])
 
     with tab1:
-        _render_markdown_export(payload, context, base_name)
+        _render_docx_export(meta, context, base_name, payload)
 
     with tab2:
+        _render_markdown_export(context, base_name)
+        st.markdown("---")
         _render_json_export(payload, base_name)
 
-    with tab3:
-        _render_docx_export(meta, context, base_name)
+
+def render() -> None:
+    main()
 
 
 if __name__ == "__main__":

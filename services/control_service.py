@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import Dict, List
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any, Dict, List
 
-from domain.control_catalog import CONTROL_CATALOG
+from domain.control_catalog import CONTROL_CATALOG, Criticite, VerdictControle
 from domain.models import Audit, ConstatControle, ControleCatalogueItem, Installation
+
+
+class ControlServiceError(Exception):
+    pass
 
 
 def is_applicable(control: ControleCatalogueItem, installation: Installation) -> bool:
@@ -14,9 +19,9 @@ def is_applicable(control: ControleCatalogueItem, installation: Installation) ->
 
     cond = control.condition_applicabilite or {}
 
-    systeme = classification.systeme_capteurs
-    echangeur = classification.type_echangeur
-    comptages = set(classification.type_comptage or [])
+    systeme = getattr(classification, "systeme_capteurs", None)
+    echangeur = getattr(classification, "type_echangeur", None)
+    comptages = set(getattr(classification, "type_comptage", []) or [])
 
     if "systeme_capteurs_in" in cond and systeme not in cond["systeme_capteurs_in"]:
         return False
@@ -42,10 +47,8 @@ def get_applicable_controls(audit: Audit) -> List[ControleCatalogueItem]:
 
 def group_controls_by_section(audit: Audit) -> Dict[str, List[ControleCatalogueItem]]:
     grouped = defaultdict(list)
-
     for item in get_applicable_controls(audit):
         grouped[item.section].append(item)
-
     return dict(grouped)
 
 
@@ -76,3 +79,347 @@ def get_or_create_constat(audit: Audit, item: ControleCatalogueItem) -> ConstatC
 def remove_non_applicable_constats(audit: Audit) -> None:
     applicable_ids = {item.controle_id for item in get_applicable_controls(audit)}
     audit.constats = [constat for constat in audit.constats if constat.controle_id in applicable_ids]
+
+
+def _get_audit(session_state: Any) -> Audit:
+    audit = session_state.get("audit")
+    if audit is None:
+        raise ControlServiceError("Aucun audit actif en session.")
+    return audit
+
+
+def _find_catalog_item(audit: Audit, controle_id: str) -> ControleCatalogueItem:
+    for item in get_applicable_controls(audit):
+        if item.controle_id == controle_id:
+            return item
+    raise ControlServiceError(f"Contrôle introuvable ou non applicable : {controle_id}")
+
+
+def ensure_control_state(session_state: Any, contexte_technique: dict[str, Any] | None = None) -> None:
+    audit = _get_audit(session_state)
+    applicable = get_applicable_controls(audit)
+    existing_ids = {c.controle_id for c in audit.constats}
+
+    for item in applicable:
+        if item.controle_id not in existing_ids:
+            audit.constats.append(
+                ConstatControle(
+                    controle_id=item.controle_id,
+                    section=item.section,
+                    libelle=item.libelle,
+                    criticite=item.criticite_par_defaut,
+                    recommandation=item.recommandation_type,
+                )
+            )
+
+    remove_non_applicable_constats(audit)
+    session_state["audit"] = audit
+
+
+def get_section_responses(
+    session_state: Any,
+    section: str,
+    contexte_technique: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    audit = _get_audit(session_state)
+    ensure_control_state(session_state, contexte_technique=contexte_technique)
+    constats_index = index_constats(audit)
+
+    rows = []
+    for item in get_applicable_controls(audit):
+        if item.section != section:
+            continue
+        response = constats_index.get(item.controle_id) or get_or_create_constat(audit, item)
+        if not hasattr(response, "criticite_finale"):
+            response.criticite_finale = getattr(response, "criticite", item.criticite_par_defaut)
+        if not hasattr(response, "photos"):
+            response.photos = []
+        if not hasattr(response, "preuve_documentaire"):
+            response.preuve_documentaire = ""
+        if not hasattr(response, "recommandation_personnalisee"):
+            response.recommandation_personnalisee = ""
+        if not hasattr(response, "non_verifiable_raison"):
+            response.non_verifiable_raison = ""
+        rows.append({"control": item, "response": response})
+
+    return rows
+
+
+def get_progress_by_section(
+    session_state: Any,
+    contexte_technique: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    audit = _get_audit(session_state)
+    ensure_control_state(session_state, contexte_technique=contexte_technique)
+
+    grouped = group_controls_by_section(audit)
+    constats_index = index_constats(audit)
+    output = []
+
+    for section, controls in grouped.items():
+        total = len(controls)
+        completed = sum(
+            1
+            for item in controls
+            if item.controle_id in constats_index and constats_index[item.controle_id].verdict is not None
+        )
+        pct = round((completed / total) * 100) if total else 0
+        output.append(
+            {
+                "section": section,
+                "total": total,
+                "completed": completed,
+                "completion_pct": pct,
+            }
+        )
+
+    output.sort(key=lambda x: x["section"])
+    return output
+
+
+def summarize_controls(
+    session_state: Any,
+    contexte_technique: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    audit = _get_audit(session_state)
+    ensure_control_state(session_state, contexte_technique=contexte_technique)
+    controls = get_applicable_controls(audit)
+    constats_index = index_constats(audit)
+
+    total = len(controls)
+    compteurs = Counter(
+        {
+            "conforme": 0,
+            "non_conforme": 0,
+            "non_present": 0,
+            "non_verifiable": 0,
+            "sans_objet": 0,
+            "non_renseigne": 0,
+        }
+    )
+    criticites_nc = Counter()
+
+    applicable_for_conformity = 0
+    conformes = 0
+
+    for item in controls:
+        constat = constats_index.get(item.controle_id)
+        verdict = constat.verdict if constat else None
+
+        if verdict is None:
+            compteurs["non_renseigne"] += 1
+            continue
+
+        verdict_value = verdict.value if hasattr(verdict, "value") else str(verdict)
+        compteurs[verdict_value] += 1
+
+        if verdict_value != VerdictControle.sans_objet.value:
+            applicable_for_conformity += 1
+            if verdict_value == VerdictControle.conforme.value:
+                conformes += 1
+
+        if verdict_value in {
+            VerdictControle.non_conforme.value,
+            VerdictControle.non_present.value,
+            VerdictControle.non_verifiable.value,
+        }:
+            criticite = getattr(constat, "criticite_finale", getattr(constat, "criticite", item.criticite_par_defaut))
+            criticite_value = criticite.value if hasattr(criticite, "value") else str(criticite)
+            criticites_nc[criticite_value] += 1
+
+    completed = total - compteurs["non_renseigne"]
+    taux_completion = round((completed / total) * 100) if total else 0
+    taux_conformite = round((conformes / applicable_for_conformity) * 100) if applicable_for_conformity else 0
+
+    return {
+        "total_applicables": total,
+        "compteurs": dict(compteurs),
+        "criticites_nc": dict(criticites_nc),
+        "taux_completion_pct": taux_completion,
+        "taux_conformite_pct": taux_conformite,
+    }
+
+
+def count_open_critical_findings(
+    session_state: Any,
+    contexte_technique: dict[str, Any] | None = None,
+) -> int:
+    audit = _get_audit(session_state)
+    ensure_control_state(session_state, contexte_technique=contexte_technique)
+
+    total = 0
+    for constat in audit.constats:
+        verdict = constat.verdict
+        if verdict not in {
+            VerdictControle.non_conforme,
+            VerdictControle.non_present,
+            VerdictControle.non_verifiable,
+        }:
+            continue
+
+        criticite = getattr(constat, "criticite_finale", getattr(constat, "criticite", None))
+        if criticite == Criticite.critique:
+            total += 1
+    return total
+
+
+def append_uploaded_evidences(
+    uploaded_files: list[Any],
+    controle_id: str,
+    session_state: Any,
+    existing_paths: list[str] | None = None,
+    base_dir: str = "data/evidences",
+) -> list[str]:
+    target_dir = Path(base_dir) / controle_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = list(existing_paths or [])
+    for uploaded in uploaded_files:
+        filename = Path(uploaded.name).name
+        out_path = target_dir / filename
+        out_path.write_bytes(uploaded.getbuffer())
+        paths.append(str(out_path))
+
+    return paths
+
+
+def update_response(
+    session_state: Any,
+    controle_id: str,
+    *,
+    verdict: str | None,
+    observation: str = "",
+    criticite_finale: str | None = None,
+    recommandation_personnalisee: str = "",
+    preuve_documentaire: str = "",
+    photos: list[str] | None = None,
+    non_verifiable_raison: str = "",
+) -> None:
+    audit = _get_audit(session_state)
+    item = _find_catalog_item(audit, controle_id)
+    constat = get_or_create_constat(audit, item)
+
+    constat.verdict = VerdictControle(verdict) if verdict else None
+    constat.observation = observation or None
+    constat.recommandation = recommandation_personnalisee or item.recommandation_type
+
+    if criticite_finale:
+        constat.criticite = Criticite(criticite_finale)
+
+    setattr(constat, "criticite_finale", getattr(constat, "criticite", item.criticite_par_defaut))
+    setattr(constat, "recommandation_personnalisee", recommandation_personnalisee or "")
+    setattr(constat, "preuve_documentaire", preuve_documentaire or "")
+    setattr(constat, "photos", list(photos or []))
+    setattr(constat, "non_verifiable_raison", non_verifiable_raison or "")
+
+    session_state["audit"] = audit
+
+
+def reset_response(
+    session_state: Any,
+    controle_id: str,
+    contexte_technique: dict[str, Any] | None = None,
+) -> None:
+    audit = _get_audit(session_state)
+    item = _find_catalog_item(audit, controle_id)
+    constat = get_or_create_constat(audit, item)
+
+    constat.verdict = None
+    constat.observation = None
+    constat.recommandation = item.recommandation_type
+    constat.criticite = item.criticite_par_defaut
+
+    setattr(constat, "criticite_finale", item.criticite_par_defaut)
+    setattr(constat, "recommandation_personnalisee", "")
+    setattr(constat, "preuve_documentaire", "")
+    setattr(constat, "photos", [])
+    setattr(constat, "non_verifiable_raison", "")
+
+    session_state["audit"] = audit
+
+
+def extract_findings(
+    session_state: Any,
+    contexte_technique: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    audit = _get_audit(session_state)
+    findings = []
+
+    for constat in audit.constats:
+        if constat.verdict not in {
+            VerdictControle.non_conforme,
+            VerdictControle.non_present,
+            VerdictControle.non_verifiable,
+        }:
+            continue
+
+        findings.append(
+            {
+                "controle_id": constat.controle_id,
+                "section": constat.section,
+                "libelle": constat.libelle,
+                "verdict": constat.verdict.value if hasattr(constat.verdict, "value") else str(constat.verdict),
+                "criticite": (
+                    getattr(constat, "criticite_finale").value
+                    if hasattr(getattr(constat, "criticite_finale", None), "value")
+                    else getattr(constat, "criticite", Criticite.mineure).value
+                ),
+                "observation": constat.observation or "",
+                "recommandation": getattr(constat, "recommandation_personnalisee", "") or constat.recommandation or "",
+                "impact": "",
+                "impact_defaut": "",
+                "preuve_documentaire": getattr(constat, "preuve_documentaire", ""),
+                "photos": list(getattr(constat, "photos", []) or []),
+            }
+        )
+
+    return findings
+
+
+def build_action_plan(
+    session_state: Any,
+    contexte_technique: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    findings = extract_findings(session_state, contexte_technique=contexte_technique)
+
+    priority_map = {
+        Criticite.critique.value: "P1",
+        Criticite.majeure.value: "P1",
+        Criticite.mineure.value: "P2",
+        Criticite.information.value: "P3",
+    }
+
+    actions = []
+    for row in findings:
+        actions.append(
+            {
+                "priorite": priority_map.get(row["criticite"], "P3"),
+                "controle_id": row["controle_id"],
+                "section": row["section"],
+                "objet": row["libelle"],
+                "impact": row.get("impact") or row.get("impact_defaut") or "",
+                "action_recommandee": row.get("recommandation") or "Définir une action corrective adaptée.",
+                "preuve_associee": row.get("preuve_documentaire", ""),
+            }
+        )
+
+    actions.sort(key=lambda x: (x["priorite"], x["section"], x["controle_id"]))
+    return actions
+
+
+def export_responses_for_report(
+    session_state: Any,
+    contexte_technique: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    audit = _get_audit(session_state)
+    return {
+        "metadata": {
+            "numero_audit": getattr(audit.meta, "numero_audit", ""),
+            "date_audit": str(getattr(audit.meta, "date_audit", "")),
+            "auditeur": getattr(audit.meta, "auditeur", ""),
+            "site": getattr(getattr(audit, "projet", None), "operation", ""),
+            "commune": getattr(getattr(getattr(audit, "projet", None), "adresse", None), "commune", ""),
+        },
+        "findings": extract_findings(session_state, contexte_technique=contexte_technique),
+        "action_plan": build_action_plan(session_state, contexte_technique=contexte_technique),
+    }

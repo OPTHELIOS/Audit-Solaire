@@ -7,12 +7,9 @@ from typing import Any, Mapping
 from domain.control_catalog import Criticite, VerdictControle
 from domain.control_service import (
     build_action_plan,
-    export_responses_for_report,
     extract_findings,
     summarize_controls,
 )
-
-SESSION_CONCLUSION_KEY = "synthese_conclusion_expert"
 
 
 @dataclass
@@ -60,7 +57,6 @@ def _criticite_rank(value: str) -> int:
         Criticite.critique.value: 0,
         Criticite.majeure.value: 1,
         Criticite.mineure.value: 2,
-        Criticite.information.value: 3,
     }
     return order.get(value, 99)
 
@@ -81,7 +77,6 @@ def _criticite_to_label(criticite: str) -> str:
         Criticite.critique.value: "critique",
         Criticite.majeure.value: "majeure",
         Criticite.mineure.value: "mineure",
-        Criticite.information.value: "d'information",
     }
     return labels.get(criticite, criticite)
 
@@ -90,9 +85,8 @@ def _make_constat_sentence(finding: dict[str, Any]) -> str:
     verdict = _verdict_to_label(finding["verdict"])
     criticite = _criticite_to_label(finding["criticite"])
     base = (
-        f"Le contrôle {finding['controle_id']} relatif à "
-        f"« {finding['libelle']} » a été classé {verdict}, "
-        f"avec une criticité {criticite}."
+        f"Le contrôle {finding['controle_id']} relatif à « {finding['libelle']} » "
+        f"a été classé {verdict}, avec une criticité {criticite}."
     )
 
     observation = _safe_str(finding.get("observation"))
@@ -239,7 +233,6 @@ def _build_section_summaries(findings: list[ReportFinding]) -> list[dict[str, An
                 "nb_critiques": criticity_counter.get(Criticite.critique.value, 0),
                 "nb_majeures": criticity_counter.get(Criticite.majeure.value, 0),
                 "nb_mineures": criticity_counter.get(Criticite.mineure.value, 0),
-                "nb_information": criticity_counter.get(Criticite.information.value, 0),
                 "nb_non_conformes": verdict_counter.get(VerdictControle.non_conforme.value, 0),
                 "nb_non_presents": verdict_counter.get(VerdictControle.non_present.value, 0),
                 "nb_non_verifiables": verdict_counter.get(VerdictControle.non_verifiable.value, 0),
@@ -260,8 +253,7 @@ def _build_key_messages(findings: list[ReportFinding], actions: list[dict[str, A
         )
 
     monitoring_findings = [
-        f
-        for f in findings
+        f for f in findings
         if "monitor" in f.section.lower()
         or "métrologie" in f.section.lower()
         or "régulation" in f.section.lower()
@@ -269,8 +261,7 @@ def _build_key_messages(findings: list[ReportFinding], actions: list[dict[str, A
     if monitoring_findings:
         messages.append(
             "Les constats liés à la régulation, à la métrologie ou au suivi de fonctionnement "
-            "doivent être considérés avec attention, car ils conditionnent la capacité à "
-            "diagnostiquer et maintenir les performances dans le temps."
+            "doivent être considérés avec attention."
         )
 
     if any(a["priorite"] == "P1" for a in actions):
@@ -290,36 +281,29 @@ def _build_key_messages(findings: list[ReportFinding], actions: list[dict[str, A
 
 def _build_methodology_note() -> list[str]:
     return [
-        (
-            "Les constats sont établis à partir des points de contrôle applicables, "
-            "des observations terrain, des pièces justificatives associées et des "
-            "informations de configuration de l’installation."
-        ),
-        (
-            "Les écarts sont hiérarchisés selon une criticité de type critique, majeure, "
-            "mineure ou information, afin de prioriser les actions correctives."
-        ),
-        (
-            "Le plan d’actions vise à traiter les écarts observés selon une logique de priorité, "
-            "de conséquence technique et de traçabilité des preuves."
-        ),
+        "Les constats sont établis à partir des points de contrôle applicables, des observations terrain, des pièces justificatives associées et des informations de configuration de l’installation.",
+        "Les écarts sont hiérarchisés selon une criticité de type critique, majeure ou mineure, afin de prioriser les actions correctives.",
+        "Le plan d’actions vise à traiter les écarts observés selon une logique de priorité et de traçabilité des preuves.",
     ]
 
 
-def _get_expert_conclusion(session_state: Any, fallback_comment: str = "") -> str:
-    if hasattr(session_state, "get"):
-        session_text = _safe_str(session_state.get(SESSION_CONCLUSION_KEY, ""))
-        if session_text:
-            return session_text
+def _extract_metadata(session_state: Any) -> dict[str, Any]:
+    audit = session_state.get("audit")
+    if audit is None:
+        return {}
 
-        audit = session_state.get("audit")
-        if audit is not None:
-            synthese = getattr(audit, "synthese", None)
-            audit_text = _safe_str(getattr(synthese, "conclusion_generale", ""))
-            if audit_text:
-                return audit_text
+    projet = getattr(audit, "projet", None)
+    meta = getattr(audit, "meta", None)
+    adresse = getattr(projet, "adresse", None) if projet else None
 
-    return _safe_str(fallback_comment)
+    return {
+        "numero_audit": getattr(meta, "numero_audit", None),
+        "date_audit": str(getattr(meta, "date_audit", "")) if meta else None,
+        "auditeur": getattr(meta, "auditeur", None),
+        "operation": getattr(projet, "operation", None) if projet else None,
+        "maitre_ouvrage": getattr(projet, "maitre_ouvrage", None) if projet else None,
+        "commune": getattr(adresse, "commune", None) if adresse else None,
+    }
 
 
 def _build_report_payload(
@@ -327,15 +311,11 @@ def _build_report_payload(
     findings: list[ReportFinding],
     actions: list[dict[str, Any]],
     metadata: Mapping[str, Any] | None = None,
-    expert_conclusion: str = "",
 ) -> dict[str, Any]:
-    global_assessment = _build_global_assessment(summary)
-
     return {
         "metadata": dict(metadata or {}),
         "executive_summary": _build_executive_summary(summary, actions),
-        "global_assessment": global_assessment,
-        "expert_conclusion": _safe_str(expert_conclusion) or global_assessment["commentaire_global"],
+        "global_assessment": _build_global_assessment(summary),
         "key_messages": _build_key_messages(findings, actions),
         "methodology_note": _build_methodology_note(),
         "section_summaries": _build_section_summaries(findings),
@@ -361,24 +341,9 @@ def build_report_data(
     findings.sort(key=lambda x: (_criticite_rank(x.criticite), x.section, x.controle_id))
 
     actions = build_action_plan(session_state, contexte_technique=contexte_technique)
-    metadata = export_responses_for_report(
-        session_state,
-        contexte_technique=contexte_technique,
-    ).get("metadata", {})
+    metadata = _extract_metadata(session_state)
 
-    global_assessment = _build_global_assessment(summary)
-    expert_conclusion = _get_expert_conclusion(
-        session_state,
-        fallback_comment=global_assessment["commentaire_global"],
-    )
-
-    return _build_report_payload(
-        summary,
-        findings,
-        actions,
-        metadata=metadata,
-        expert_conclusion=expert_conclusion,
-    )
+    return _build_report_payload(summary, findings, actions, metadata=metadata)
 
 
 def generate_section_narrative(
@@ -433,10 +398,6 @@ def build_report_markdown(
     lines.append("")
     lines.append("## Appréciation globale")
     lines.append(payload["global_assessment"]["commentaire_global"])
-
-    lines.append("")
-    lines.append("## Conclusion experte")
-    lines.append(payload.get("expert_conclusion", payload["global_assessment"]["commentaire_global"]))
 
     lines.append("")
     lines.append("## Messages clés")

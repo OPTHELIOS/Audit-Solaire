@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
 import streamlit as st
 
 from domain.enums import TypePreuve
@@ -9,7 +14,6 @@ from services.evidence_service import (
 )
 from ui.state import get_audit, save_audit
 
-
 TYPE_LABELS = {
     TypePreuve.PHOTO: "Photo",
     TypePreuve.DOCUMENT: "Document",
@@ -18,9 +22,268 @@ TYPE_LABELS = {
     TypePreuve.PLAQUE_SIGNALETIQUE: "Plaque signalétique",
 }
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
-def _safe_str(value, default: str = "-") -> str:
-    return value if value not in (None, "") else default
+
+def _safe_str(value: Any, default: str = "") -> str:
+    return str(value) if value not in (None, "") else default
+
+
+def _safe_get(obj: Any, attr: str, default: Any = None) -> Any:
+    return getattr(obj, attr, default)
+
+
+def _build_control_options(audit: Any) -> dict[str, dict[str, str]]:
+    options: dict[str, dict[str, str]] = {}
+
+    for constat in _safe_get(audit, "constats", []) or []:
+        controle_id = _safe_get(constat, "controle_id")
+        libelle = _safe_get(constat, "libelle", "Sans libellé")
+        section = _safe_get(constat, "section", "")
+
+        if not controle_id:
+            continue
+
+        label = f"{controle_id} - {libelle}"
+        options[label] = {
+            "controle_id": controle_id,
+            "libelle": libelle,
+            "section": section,
+        }
+
+    return options
+
+
+def _build_evidence_rows(audit: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    preuves = _safe_get(audit, "preuves", []) or []
+
+    for preuve in preuves:
+        type_preuve = _safe_get(preuve, "type_preuve")
+        type_value = _safe_get(type_preuve, "value", "Inconnu")
+        file_path = _safe_str(_safe_get(preuve, "fichier_path"))
+        suffix = Path(file_path).suffix.lower() if file_path else ""
+        is_image = suffix in IMAGE_EXTENSIONS
+
+        rows.append(
+            {
+                "preuve": preuve,
+                "preuve_id": _safe_str(_safe_get(preuve, "preuve_id"), "Sans identifiant"),
+                "type": type_value,
+                "type_label": TYPE_LABELS.get(type_preuve, type_value),
+                "nom_original": _safe_str(
+                    _safe_get(preuve, "nom_original"),
+                    Path(file_path).name if file_path else "Fichier sans nom",
+                ),
+                "section": _safe_str(_safe_get(preuve, "section"), "Non renseignée"),
+                "controle_id": _safe_str(_safe_get(preuve, "controle_id")),
+                "legende": _safe_str(_safe_get(preuve, "legende"), "Sans légende"),
+                "auteur": _safe_str(_safe_get(preuve, "auteur"), "Non renseigné"),
+                "file_path": file_path,
+                "is_orphan": not bool(_safe_get(preuve, "controle_id")),
+                "is_image": is_image,
+            }
+        )
+
+    return rows
+
+
+def _render_top_metrics(rows: list[dict[str, Any]]) -> None:
+    total = len(rows)
+    linked = sum(1 for row in rows if row["controle_id"])
+    orphan = sum(1 for row in rows if row["is_orphan"])
+    photos = sum(1 for row in rows if row["type"] == TypePreuve.PHOTO.value)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Preuves totales", total)
+    c2.metric("Rattachées à un contrôle", linked)
+    c3.metric("Preuves orphelines", orphan)
+    c4.metric("Photos", photos)
+
+
+def _render_add_form(audit: Any, control_options: dict[str, dict[str, str]]) -> None:
+    st.subheader("Ajouter une preuve")
+
+    labels = ["Aucun"] + list(control_options.keys())
+    selected_label = st.selectbox("Rattacher à un contrôle", options=labels, index=0)
+
+    selected_control = control_options.get(selected_label) if selected_label != "Aucun" else None
+    suggested_section = selected_control["section"] if selected_control else ""
+    suggested_legend = (
+        f"{selected_control['controle_id']} - {selected_control['libelle']}"
+        if selected_control
+        else ""
+    )
+
+    with st.form("preuve_form", clear_on_submit=False):
+        uploaded_file = st.file_uploader(
+            "Fichier",
+            type=["jpg", "jpeg", "png", "pdf", "doc", "docx", "xls", "xlsx"],
+            accept_multiple_files=False,
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            type_preuve = st.selectbox(
+                "Type de preuve",
+                options=list(TYPE_LABELS.keys()),
+                format_func=lambda x: TYPE_LABELS[x],
+            )
+        with col2:
+            auteur = st.text_input(
+                "Auteur / origine",
+                value=_safe_str(_safe_get(_safe_get(audit, "meta"), "auditeur")),
+                placeholder="Nom de l'auditeur ou origine du document",
+            )
+
+        section = st.text_input(
+            "Section",
+            value=suggested_section,
+            placeholder="Ex. Hydraulique solaire",
+        )
+
+        legende = st.text_input(
+            "Légende",
+            value=suggested_legend,
+            placeholder="Ex. Soupape de sécurité absente sur le groupe solaire",
+        )
+
+        submitted = st.form_submit_button(
+            "Enregistrer la preuve",
+            type="primary",
+            use_container_width=True,
+        )
+
+        if not submitted:
+            return
+
+        if uploaded_file is None:
+            st.error("Ajoute d'abord un fichier.")
+            return
+
+        try:
+            controle_id = selected_control["controle_id"] if selected_control else None
+
+            preuve = save_uploaded_file(
+                audit_id=audit.meta.audit_id,
+                uploaded_file=uploaded_file,
+                type_preuve=type_preuve,
+                section=section or None,
+                controle_id=controle_id,
+                legende=legende or None,
+                auteur=auteur or None,
+            )
+
+            audit_updated = attach_preuve_to_audit(audit, preuve)
+
+            if controle_id:
+                audit_updated = attach_preuve_to_constat(
+                    audit_updated,
+                    controle_id,
+                    preuve.preuve_id,
+                )
+
+            audit_updated = touch_audit(audit_updated)
+            save_audit(audit_updated)
+
+            st.success("Preuve enregistrée et rattachée à l'audit.")
+            st.rerun()
+
+        except Exception as exc:
+            st.error(f"Erreur lors de l'enregistrement de la preuve : {exc}")
+
+
+def _render_filters(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    st.subheader("Filtrer les preuves")
+
+    all_types = sorted({row["type_label"] for row in rows})
+    all_sections = sorted({row["section"] for row in rows if row["section"]})
+    all_controles = sorted({row["controle_id"] for row in rows if row["controle_id"]})
+
+    c1, c2 = st.columns(2)
+    with c1:
+        selected_types = st.multiselect("Type", options=all_types, default=[])
+        selected_sections = st.multiselect("Section", options=all_sections, default=[])
+    with c2:
+        selected_controles = st.multiselect("Contrôle lié", options=all_controles, default=[])
+        orphan_only = st.checkbox("Afficher seulement les preuves orphelines", value=False)
+
+    filtered = []
+
+    for row in rows:
+        if selected_types and row["type_label"] not in selected_types:
+            continue
+        if selected_sections and row["section"] not in selected_sections:
+            continue
+        if selected_controles and row["controle_id"] not in selected_controles:
+            continue
+        if orphan_only and not row["is_orphan"]:
+            continue
+        filtered.append(row)
+
+    return filtered
+
+
+def _render_orphan_alert(rows: list[dict[str, Any]]) -> None:
+    orphan_count = sum(1 for row in rows if row["is_orphan"])
+
+    if orphan_count:
+        st.warning(
+            f"{orphan_count} preuve(s) ne sont rattachées à aucun contrôle. "
+            "Cela peut affaiblir la traçabilité du rapport."
+        )
+    else:
+        st.success("Toutes les preuves sont rattachées à un contrôle ou correctement contextualisées.")
+
+
+def _render_image_preview(file_path: str, caption: str) -> None:
+    try:
+        path = Path(file_path)
+        if path.exists():
+            st.image(str(path), caption=caption, use_container_width=True)
+        else:
+            st.caption("Aperçu image indisponible : fichier non accessible localement.")
+    except Exception:
+        st.caption("Aperçu image indisponible.")
+
+
+def _render_evidence_card(row: dict[str, Any]) -> None:
+    badge = "Orpheline" if row["is_orphan"] else f"Contrôle {row['controle_id']}"
+    title = f"{row['type_label'].upper()} - {row['nom_original']}"
+
+    with st.expander(title, expanded=False):
+        col1, col2 = st.columns([1.2, 1])
+
+        with col1:
+            if row["is_image"]:
+                _render_image_preview(row["file_path"], row["nom_original"])
+            else:
+                st.info("Aperçu non disponible pour ce type de fichier.")
+
+        with col2:
+            st.write(f"**ID** : {row['preuve_id']}")
+            st.write(f"**Type** : {row['type_label']}")
+            st.write(f"**Statut** : {badge}")
+            st.write(f"**Section** : {row['section']}")
+            st.write(f"**Légende** : {row['legende']}")
+            st.write(f"**Auteur** : {row['auteur']}")
+            st.write(f"**Fichier** : {row['file_path'] or 'Non renseigné'}")
+
+            if row["is_orphan"]:
+                st.caption(
+                    "Conseil : rattacher cette preuve à un contrôle améliore la traçabilité du rapport."
+                )
+
+
+def _render_existing_evidences(rows: list[dict[str, Any]]) -> None:
+    st.subheader("Preuves enregistrées")
+
+    if not rows:
+        st.info("Aucune preuve ne correspond aux filtres sélectionnés.")
+        return
+
+    for row in rows:
+        _render_evidence_card(row)
 
 
 def render() -> None:
@@ -29,98 +292,21 @@ def render() -> None:
     st.header("03 - Preuves et annexes")
     st.caption("Gestion centralisée des photos, documents et pièces justificatives.")
 
-    st.subheader("Ajouter une preuve")
+    control_options = _build_control_options(audit)
+    rows = _build_evidence_rows(audit)
 
-    uploaded_file = st.file_uploader(
-        "Fichier",
-        type=["jpg", "jpeg", "png", "pdf", "doc", "docx", "xls", "xlsx"],
-        accept_multiple_files=False,
-    )
-
-    type_preuve = st.selectbox(
-        "Type de preuve",
-        options=list(TYPE_LABELS.keys()),
-        format_func=lambda x: TYPE_LABELS[x],
-    )
-
-    legende = st.text_input(
-        "Légende",
-        placeholder="Ex. Soupape de sécurité absente sur le groupe solaire",
-    )
-
-    section = st.text_input(
-        "Section",
-        placeholder="Ex. Hydraulique solaire",
-    )
-
-    controle_options = {}
-    for constat in getattr(audit, "constats", []):
-        controle_id = getattr(constat, "controle_id", None)
-        libelle = getattr(constat, "libelle", None)
-        if controle_id:
-            label = f"{controle_id} - {libelle or 'Sans libellé'}"
-            controle_options[label] = controle_id
-
-    selected_label = st.selectbox(
-        "Rattacher à un contrôle",
-        options=["Aucun"] + list(controle_options.keys()),
-    )
-
-    auteur = st.text_input(
-        "Auteur / origine",
-        value=getattr(audit.meta, "auditeur", "") or "",
-    )
-
-    if st.button("Enregistrer la preuve", type="primary"):
-        if uploaded_file is None:
-            st.error("Ajoute d'abord un fichier.")
-        else:
-            try:
-                controle_id = None if selected_label == "Aucun" else controle_options[selected_label]
-
-                preuve = save_uploaded_file(
-                    audit_id=audit.meta.audit_id,
-                    uploaded_file=uploaded_file,
-                    type_preuve=type_preuve,
-                    section=section or None,
-                    controle_id=controle_id,
-                    legende=legende or None,
-                    auteur=auteur or None,
-                )
-
-                audit = attach_preuve_to_audit(audit, preuve)
-
-                if controle_id:
-                    audit = attach_preuve_to_constat(audit, controle_id, preuve.preuve_id)
-
-                audit = touch_audit(audit)
-                save_audit(audit)
-
-                st.success("Preuve enregistrée et rattachée à l'audit.")
-                st.rerun()
-
-            except Exception as exc:
-                st.error(f"Erreur lors de l'enregistrement de la preuve : {exc}")
-
+    _render_top_metrics(rows)
     st.divider()
-    st.subheader("Preuves enregistrées")
 
-    preuves = getattr(audit, "preuves", [])
+    _render_add_form(audit, control_options)
+    st.divider()
 
-    if not preuves:
-        st.info("Aucune preuve enregistrée.")
+    _render_orphan_alert(rows)
+
+    if not rows:
+        st.info("Aucune preuve enregistrée pour le moment.")
         return
 
-    for preuve in preuves:
-        titre = f"{getattr(getattr(preuve, 'type_preuve', None), 'value', 'PREUVE').upper()} - {_safe_str(getattr(preuve, 'nom_original', None), getattr(preuve, 'preuve_id', 'Sans identifiant'))}"
-
-        with st.expander(titre):
-            st.write(f"ID : {_safe_str(getattr(preuve, 'preuve_id', None))}")
-            st.write(
-                f"Type : {_safe_str(getattr(getattr(preuve, 'type_preuve', None), 'value', None))}"
-            )
-            st.write(f"Section : {_safe_str(getattr(preuve, 'section', None))}")
-            st.write(f"Contrôle lié : {_safe_str(getattr(preuve, 'controle_id', None))}")
-            st.write(f"Légende : {_safe_str(getattr(preuve, 'legende', None))}")
-            st.write(f"Fichier : {_safe_str(getattr(preuve, 'fichier_path', None))}")
-            st.write(f"Auteur : {_safe_str(getattr(preuve, 'auteur', None))}")
+    filtered_rows = _render_filters(rows)
+    st.divider()
+    _render_existing_evidences(filtered_rows)

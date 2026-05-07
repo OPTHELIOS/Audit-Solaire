@@ -14,7 +14,8 @@ from domain.report_service import (
     generate_section_narrative,
 )
 
-PAGE_TITLE = "04 - Synthèse de l'audit"
+PAGE_TITLE = "05 - Synthèse de l'audit"
+SESSION_CONCLUSION_KEY = "synthese_conclusion_expert"
 
 
 def _get_context_from_session() -> dict[str, Any]:
@@ -25,7 +26,10 @@ def _get_context_from_session() -> dict[str, Any]:
     return {
         "systeme_capteurs": installation.get("systeme_capteurs"),
         "type_echangeur": installation.get("type_echangeur"),
-        "type_stockage_solaire": installation.get("type_stockage_solaire"),
+        "type_stockage_solaire": (
+            installation.get("type_stockage_solaire")
+            or installation.get("type_stockage")
+        ),
         "type_comptage": installation.get("type_comptage", []),
         "requires_monitoring": bool(installation.get("requires_monitoring", False)),
         "requires_telecontrole": bool(installation.get("requires_telecontrole", False)),
@@ -35,7 +39,7 @@ def _get_context_from_session() -> dict[str, Any]:
 def _render_header(context: dict[str, Any]) -> None:
     st.title(PAGE_TITLE)
     st.caption(
-        "Lecture consolidée des constats, hiérarchisation des écarts et prévisualisation du contenu de rapport."
+        "Lecture consolidée des constats, hiérarchisation des écarts et préparation du rapport final."
     )
 
     with st.expander("Contexte technique de synthèse", expanded=False):
@@ -43,7 +47,8 @@ def _render_header(context: dict[str, Any]) -> None:
         c1.write(f"**Système capteurs** : {context.get('systeme_capteurs') or 'Non défini'}")
         c2.write(f"**Type échangeur** : {context.get('type_echangeur') or 'Non défini'}")
         c3.write(
-            f"**Type stockage solaire** : {context.get('type_stockage_solaire') or 'Non défini'}"
+            f"**Type stockage solaire** : "
+            f"{context.get('type_stockage_solaire') or 'Non défini'}"
         )
 
         c4, c5, c6 = st.columns(3)
@@ -54,65 +59,158 @@ def _render_header(context: dict[str, Any]) -> None:
 
 
 def _render_global_metrics(payload: dict[str, Any]) -> None:
-    ga = payload["global_assessment"]
-    counts = payload["counts"]
+    ga = payload.get("global_assessment", {})
+    counts = payload.get("counts", {})
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Statut global", ga["statut_global"])
-    c2.metric("Taux de complétion", f"{ga['taux_completion_pct']} %")
-    c3.metric("Taux de conformité", f"{ga['taux_conformite_pct']} %")
-    c4.metric("Constats critiques", counts["critical_findings"])
-    c5.metric("Constats majeurs", counts["major_findings"])
+    c1.metric("Statut global", ga.get("statut_global", "-"))
+    c2.metric("Taux de complétion", f"{ga.get('taux_completion_pct', 0)} %")
+    c3.metric("Taux de conformité", f"{ga.get('taux_conformite_pct', 0)} %")
+    c4.metric("Constats critiques", counts.get("critical_findings", 0))
+    c5.metric("Constats majeurs", counts.get("major_findings", 0))
 
     st.progress(
-        min(max(ga["taux_completion_pct"] / 100.0, 0.0), 1.0),
+        min(max(ga.get("taux_completion_pct", 0) / 100.0, 0.0), 1.0),
         text="Niveau de complétude de l’audit",
     )
 
-    if ga["statut_global"] == "défavorable":
-        st.error(ga["commentaire_global"])
-    elif ga["statut_global"] in ("réserves majeures", "à consolider"):
-        st.warning(ga["commentaire_global"])
+    statut = ga.get("statut_global", "")
+    commentaire = ga.get("commentaire_global", "")
+
+    if not commentaire:
+        return
+
+    if statut == "défavorable":
+        st.error(commentaire)
+    elif statut in ("réserves majeures", "à consolider"):
+        st.warning(commentaire)
     else:
-        st.success(ga["commentaire_global"])
+        st.success(commentaire)
+
+
+def _render_readiness_panel(payload: dict[str, Any]) -> None:
+    counts = payload.get("counts", {})
+    ga = payload.get("global_assessment", {})
+
+    metadata = payload.get("metadata", {}) or {}
+    numero_audit = metadata.get("numero_audit")
+    contexte_technique = metadata.get("contexte_technique") or {}
+
+    checks = [
+        ("Référence audit", bool(numero_audit)),
+        ("Installation qualifiée", bool(contexte_technique)),
+        ("Constats présents", counts.get("total_findings", 0) > 0),
+        ("Plan d'actions exploitable", counts.get("total_actions", 0) > 0 or ga.get("taux_completion_pct", 0) >= 80),
+        ("Audit suffisamment complété", ga.get("taux_completion_pct", 0) >= 80),
+    ]
+
+    st.subheader("Audit prêt à exporter ?")
+
+    cols = st.columns(len(checks))
+    for col, (label, ok) in zip(cols, checks):
+        if ok:
+            col.success(label)
+        else:
+            col.warning(label)
+
+    if all(ok for _, ok in checks):
+        st.success("Le dossier paraît suffisamment consolidé pour lancer un export de rapport.")
+    else:
+        st.info("Certaines briques sont encore incomplètes ou insuffisamment consolidées avant export.")
 
 
 def _render_executive_summary(payload: dict[str, Any]) -> None:
     st.subheader("Synthèse exécutive")
-    for line in payload["executive_summary"]:
+
+    for line in payload.get("executive_summary", []):
         st.write(f"- {line}")
 
     st.markdown("#### Messages clés")
-    for line in payload["key_messages"]:
+    for line in payload.get("key_messages", []):
         st.write(f"- {line}")
 
     st.markdown("#### Note méthodologique")
-    for line in payload["methodology_note"]:
+    for line in payload.get("methodology_note", []):
         st.write(f"- {line}")
+
+
+def _render_expert_conclusion(payload: dict[str, Any]) -> None:
+    st.subheader("Conclusion experte")
+
+    default_text = st.session_state.get(SESSION_CONCLUSION_KEY, "")
+    if not default_text:
+        default_text = payload.get("global_assessment", {}).get("commentaire_global", "")
+
+    conclusion = st.text_area(
+        "Conclusion libre",
+        value=default_text,
+        height=180,
+        placeholder="Saisir ici une conclusion technique libre, exploitable dans le rapport final.",
+    )
+
+    c1, c2 = st.columns(2)
+
+    if c1.button("Enregistrer la conclusion", use_container_width=True):
+        st.session_state[SESSION_CONCLUSION_KEY] = conclusion
+        st.success("Conclusion enregistrée dans la session.")
+
+    if c2.button("Réinitialiser depuis le statut global", use_container_width=True):
+        st.session_state[SESSION_CONCLUSION_KEY] = payload.get("global_assessment", {}).get(
+            "commentaire_global", ""
+        )
+        st.rerun()
+
+
+def _render_top_actions(context: dict[str, Any]) -> None:
+    st.subheader("Actions prioritaires")
+
+    rows = generate_action_plan_table(
+        st.session_state,
+        contexte_technique=context,
+    )
+
+    if not rows:
+        st.success("Aucune action corrective n’est actuellement générée.")
+        return
+
+    df = pd.DataFrame(rows)
+    priority_order = {"P1": 1, "P2": 2, "P3": 3}
+    df["priority_order"] = df["priorite"].map(priority_order).fillna(99)
+    df = df.sort_values(by=["priority_order", "section", "controle_id"]).head(5)
+
+    for _, row in df.iterrows():
+        with st.expander(f"{row['priorite']} — {row['controle_id']} — {row['objet']}", expanded=False):
+            st.write(f"**Section** : {row['section']}")
+            st.write(f"**Impact** : {row.get('impact', '')}")
+            st.write(f"**Action recommandée** : {row.get('action_recommandee', '')}")
+            if row.get("preuves_disponibles"):
+                st.write(f"**Preuves disponibles** : {row['preuves_disponibles']}")
+            if row.get("photos"):
+                st.write(f"**Nombre de photos** : {len(row['photos'])}")
 
 
 def _render_section_summary_table(payload: dict[str, Any]) -> None:
     st.subheader("Vue par section")
 
-    rows = payload["section_summaries"]
+    rows = payload.get("section_summaries", [])
     if not rows:
         st.info("Aucun constat structurant n’est disponible pour le moment.")
         return
 
-    df = pd.DataFrame(rows)
-    rename_map = {
-        "section": "Section",
-        "nb_constats": "Constats",
-        "nb_critiques": "Critiques",
-        "nb_majeures": "Majeures",
-        "nb_mineures": "Mineures",
-        "nb_information": "Information",
-        "nb_non_conformes": "Non conformes",
-        "nb_non_presents": "Non présents",
-        "nb_non_verifiables": "Non vérifiables",
-        "texte_intro": "Lecture",
-    }
-    df = df.rename(columns=rename_map)
+    df = pd.DataFrame(rows).rename(
+        columns={
+            "section": "Section",
+            "nb_constats": "Constats",
+            "nb_critiques": "Critiques",
+            "nb_majeures": "Majeures",
+            "nb_mineures": "Mineures",
+            "nb_information": "Information",
+            "nb_non_conformes": "Non conformes",
+            "nb_non_presents": "Non présents",
+            "nb_non_verifiables": "Non vérifiables",
+            "texte_intro": "Lecture",
+        }
+    )
 
     st.dataframe(
         df,
@@ -125,17 +223,57 @@ def _render_section_summary_table(payload: dict[str, Any]) -> None:
     )
 
 
+def _render_findings_overview(payload: dict[str, Any]) -> None:
+    st.subheader("Constats prioritaires")
+
+    rows = payload.get("findings_flat", [])
+    if not rows:
+        st.info("Aucun constat prioritaire à afficher.")
+        return
+
+    top_rows = [row for row in rows if row.get("criticite") in {"critique", "majeure"}]
+
+    if not top_rows:
+        st.info("Aucun constat critique ou majeur n’est actuellement recensé.")
+        return
+
+    for row in top_rows[:10]:
+        criticity = str(row.get("criticite", "")).upper()
+        with st.expander(
+            f"{criticity} — {row.get('controle_id', '-')} — {row.get('libelle', '-')}",
+            expanded=False,
+        ):
+            st.write(f"**Section** : {row.get('section', '-')}")
+            st.write(f"**Verdict** : {row.get('verdict', '-')}")
+            st.write(f"**Constat** : {row.get('phrase_constat', '-')}")
+            st.write(f"**Impact** : {row.get('phrase_impact', '-')}")
+            st.write(f"**Action** : {row.get('phrase_action', '-')}")
+            if row.get("preuve_documentaire"):
+                st.write(f"**Preuve documentaire** : {row['preuve_documentaire']}")
+            if row.get("photos"):
+                st.write(f"**Nombre de fichiers photo** : {len(row['photos'])}")
+
+
 def _render_findings_tab(payload: dict[str, Any], context: dict[str, Any]) -> None:
     st.subheader("Constats détaillés")
 
-    sections = list(payload["findings_by_section"].keys())
+    findings_by_section = payload.get("findings_by_section", {})
+    sections = list(findings_by_section.keys())
+
     if not sections:
         st.info("Aucun constat rédigé n’est encore disponible.")
         return
 
-    selected_section = st.selectbox(
-        "Choisir une section à relire",
-        options=sections,
+    c1, c2 = st.columns(2)
+    selected_section = c1.selectbox("Choisir une section à relire", options=sections, index=0)
+    sort_mode = c2.selectbox(
+        "Trier par",
+        options=["ordre_naturel", "criticite", "verdict"],
+        format_func=lambda x: {
+            "ordre_naturel": "Ordre naturel",
+            "criticite": "Criticité",
+            "verdict": "Verdict",
+        }[x],
         index=0,
     )
 
@@ -146,41 +284,43 @@ def _render_findings_tab(payload: dict[str, Any], context: dict[str, Any]) -> No
     )
 
     st.markdown(f"#### {selected_section}")
-    st.write(narrative["intro"])
+    st.write(narrative.get("intro", ""))
 
-    if not narrative["paragraphs"]:
-        st.info("Aucun paragraphe disponible pour cette section.")
-        return
-
-    for idx, paragraph in enumerate(narrative["paragraphs"], start=1):
+    for idx, paragraph in enumerate(narrative.get("paragraphs", []), start=1):
         with st.expander(f"Constat {idx}", expanded=(idx == 1)):
             st.write(paragraph)
 
-    raw_rows = payload["findings_by_section"].get(selected_section, [])
-    if raw_rows:
-        st.markdown("#### Tableau de contrôle")
-        table_rows = []
-        for row in raw_rows:
-            table_rows.append(
-                {
-                    "ID": row["controle_id"],
-                    "Libellé": row["libelle"],
-                    "Criticité": row["criticite"],
-                    "Verdict": row["verdict"],
-                    "Preuve documentaire": row["preuve_documentaire"],
-                    "Nb preuves": len(row["photos"]),
-                }
-            )
+    raw_rows = findings_by_section.get(selected_section, [])
+    if not raw_rows:
+        st.info("Aucune ligne détaillée disponible pour cette section.")
+        return
 
-        df = pd.DataFrame(table_rows)
-        st.dataframe(
-            df,
-            hide_index=True,
-            width="stretch",
-        )
+    df = pd.DataFrame(
+        [
+            {
+                "ID": row.get("controle_id", ""),
+                "Libellé": row.get("libelle", ""),
+                "Criticité": row.get("criticite", ""),
+                "Verdict": row.get("verdict", ""),
+                "Preuve documentaire": row.get("preuve_documentaire", ""),
+                "Nb photos": len(row.get("photos", [])),
+            }
+            for row in raw_rows
+        ]
+    )
+
+    if sort_mode == "criticite":
+        order = {"critique": 1, "majeure": 2, "mineure": 3, "information": 4}
+        df["_sort"] = df["Criticité"].map(order).fillna(99)
+        df = df.sort_values(by=["_sort", "ID"]).drop(columns=["_sort"])
+    elif sort_mode == "verdict":
+        df = df.sort_values(by=["Verdict", "ID"])
+
+    st.markdown("#### Tableau de contrôle")
+    st.dataframe(df, hide_index=True, width="stretch")
 
 
-def _render_action_plan_tab(payload: dict[str, Any], context: dict[str, Any]) -> None:
+def _render_action_plan_tab(context: dict[str, Any]) -> None:
     st.subheader("Plan d’actions")
 
     rows = generate_action_plan_table(
@@ -192,8 +332,7 @@ def _render_action_plan_tab(payload: dict[str, Any], context: dict[str, Any]) ->
         st.success("Aucune action corrective n’est actuellement générée.")
         return
 
-    df = pd.DataFrame(rows)
-    df = df.rename(
+    df = pd.DataFrame(rows).rename(
         columns={
             "priorite": "Priorité",
             "controle_id": "ID",
@@ -201,7 +340,7 @@ def _render_action_plan_tab(payload: dict[str, Any], context: dict[str, Any]) ->
             "objet": "Objet",
             "impact": "Impact",
             "action_recommandee": "Action recommandée",
-            "preuve_associee": "Preuve associée",
+            "preuves_disponibles": "Preuves disponibles",
         }
     )
 
@@ -216,7 +355,7 @@ def _render_action_plan_tab(payload: dict[str, Any], context: dict[str, Any]) ->
             "Objet": st.column_config.Column(width="medium"),
             "Impact": st.column_config.Column(width="large"),
             "Action recommandée": st.column_config.Column(width="large"),
-            "Preuve associée": st.column_config.Column(width="large"),
+            "Preuves disponibles": st.column_config.Column(width="large"),
         },
     )
 
@@ -229,6 +368,7 @@ def _render_action_plan_tab(payload: dict[str, Any], context: dict[str, Any]) ->
 
 def _render_raw_report_tab(payload: dict[str, Any], context: dict[str, Any]) -> None:
     st.subheader("Prévisualisation du rapport")
+
     markdown_text = build_report_markdown(
         st.session_state,
         contexte_technique=context,
@@ -237,7 +377,7 @@ def _render_raw_report_tab(payload: dict[str, Any], context: dict[str, Any]) -> 
     st.text_area(
         "Markdown généré",
         value=markdown_text,
-        height=500,
+        height=420,
     )
 
     st.download_button(
@@ -248,48 +388,18 @@ def _render_raw_report_tab(payload: dict[str, Any], context: dict[str, Any]) -> 
         width="stretch",
     )
 
-    json_bytes = BytesIO()
-    json_bytes.write(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
-    json_bytes.seek(0)
+    with st.expander("Export JSON simplifié", expanded=False):
+        json_bytes = BytesIO()
+        json_bytes.write(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        json_bytes.seek(0)
 
-    st.download_button(
-        label="Télécharger un export JSON simplifié",
-        data=json_bytes.getvalue(),
-        file_name="rapport_audit_technique.json",
-        mime="application/json",
-        width="stretch",
-    )
-
-
-def _render_findings_overview(payload: dict[str, Any]) -> None:
-    st.subheader("Constats prioritaires")
-
-    rows = payload["findings_flat"]
-    if not rows:
-        st.info("Aucun constat prioritaire à afficher.")
-        return
-
-    top_rows = [
-        row for row in rows
-        if row["criticite"] in {"critique", "majeure"}
-    ]
-
-    if not top_rows:
-        st.info("Aucun constat critique ou majeur n’est actuellement recensé.")
-        return
-
-    for row in top_rows[:10]:
-        criticity = row["criticite"].upper()
-        with st.expander(f"{criticity} — {row['controle_id']} — {row['libelle']}", expanded=False):
-            st.write(f"**Section** : {row['section']}")
-            st.write(f"**Verdict** : {row['verdict']}")
-            st.write(f"**Constat** : {row['phrase_constat']}")
-            st.write(f"**Impact** : {row['phrase_impact']}")
-            st.write(f"**Action** : {row['phrase_action']}")
-            if row.get("preuve_documentaire"):
-                st.write(f"**Preuve documentaire** : {row['preuve_documentaire']}")
-            if row.get("photos"):
-                st.write(f"**Nombre de fichiers de preuve** : {len(row['photos'])}")
+        st.download_button(
+            label="Télécharger un export JSON simplifié",
+            data=json_bytes.getvalue(),
+            file_name="rapport_audit_technique.json",
+            mime="application/json",
+            width="stretch",
+        )
 
 
 def main() -> None:
@@ -298,18 +408,18 @@ def main() -> None:
 
     _render_header(context)
     _render_global_metrics(payload)
+    _render_readiness_panel(payload)
 
     tab1, tab2, tab3, tab4 = st.tabs(
-        [
-            "Synthèse",
-            "Constats",
-            "Plan d'actions",
-            "Export brut",
-        ]
+        ["Synthèse", "Constats", "Plan d'actions", "Export brut"]
     )
 
     with tab1:
         _render_executive_summary(payload)
+        st.markdown("---")
+        _render_expert_conclusion(payload)
+        st.markdown("---")
+        _render_top_actions(context)
         st.markdown("---")
         _render_section_summary_table(payload)
         st.markdown("---")
@@ -319,10 +429,14 @@ def main() -> None:
         _render_findings_tab(payload, context)
 
     with tab3:
-        _render_action_plan_tab(payload, context)
+        _render_action_plan_tab(context)
 
     with tab4:
         _render_raw_report_tab(payload, context)
+
+
+def render() -> None:
+    main()
 
 
 if __name__ == "__main__":
