@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from domain.audit_studio import AuditStudioBlock, ModeRapport
+
 
 class StatutAudit(str, Enum):
     brouillon = "brouillon"
@@ -186,6 +188,10 @@ class Audit(BaseModel):
     constats: list[ConstatControle] = Field(default_factory=list)
     preuves: list[Preuve] = Field(default_factory=list)
     synthese: SyntheseAudit = Field(default_factory=SyntheseAudit)
+    mode_rapport: ModeRapport = ModeRapport.audit_complet
+    studio: AuditStudioBlock = Field(default_factory=AuditStudioBlock)
+
+    model_config = {"extra": "ignore"}
 # Alias de compatibilité avec l'ancien code
 Constat = ConstatControle
 AuditInfo = AuditMeta
