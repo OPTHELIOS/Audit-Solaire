@@ -13,6 +13,7 @@ from domain.report_service import (
     generate_action_plan_table,
     generate_section_narrative,
 )
+from ui.studio_panel import render_studio_panel
 
 PAGE_TITLE = "05 - Synthèse de l'audit"
 SESSION_CONCLUSION_KEY = "synthese_conclusion_expert"
@@ -410,8 +411,8 @@ def main() -> None:
     _render_global_metrics(payload)
     _render_readiness_panel(payload)
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["Synthèse", "Constats", "Plan d'actions", "Export brut"]
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["Synthèse", "Constats", "Plan d'actions", "Studio OPT'HELIOS", "Export brut"]
     )
 
     with tab1:
@@ -432,6 +433,9 @@ def main() -> None:
         _render_action_plan_tab(context)
 
     with tab4:
+        render_studio_panel()
+
+    with tab5:
         _render_raw_report_tab(payload, context)
 
 

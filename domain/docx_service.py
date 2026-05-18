@@ -11,6 +11,13 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
+from domain.audit_studio import (
+    FORMULATIONS_BY_CODE,
+    MODE_RAPPORT_LABELS,
+    SCENARIOS_BY_CODE,
+    AuditStudioBlock,
+    extract_studio_from_session,
+)
 from domain.report_service import build_report_data
 
 
@@ -346,8 +353,73 @@ def _add_action_plan(document: Document, payload: dict[str, Any]) -> None:
             _set_cell_text(cell, _safe_str(value))
 
 
+def _add_studio_sections(document: Document, studio: AuditStudioBlock | None) -> None:
+    if studio is None:
+        return
+
+    document.add_heading("6. Studio OPT'HELIOS — orientations stratégiques", level=1)
+
+    mode_label = MODE_RAPPORT_LABELS.get(studio.mode_rapport.value, studio.mode_rapport.value)
+    p = document.add_paragraph()
+    p.add_run("Mode de rapport : ").bold = True
+    p.add_run(mode_label)
+
+    selected = studio.selected_scenarios()
+    document.add_heading("6.1 Scénarios retenus", level=2)
+    if selected:
+        for sel in selected:
+            scenario = SCENARIOS_BY_CODE.get(sel.code)
+            title = scenario.libelle if scenario else sel.code
+            horizon = f" — {scenario.horizon}" if scenario and scenario.horizon else ""
+            document.add_heading(f"{title}{horizon}", level=3)
+            if scenario and scenario.description:
+                document.add_paragraph(scenario.description)
+            if sel.commentaire:
+                p = document.add_paragraph()
+                p.add_run("Justification OPT'HELIOS : ").bold = True
+                p.add_run(_safe_str(sel.commentaire))
+            if scenario and scenario.actions_types:
+                document.add_paragraph("Actions types associées :")
+                _add_bullets(document, list(scenario.actions_types))
+    else:
+        document.add_paragraph("Aucun scénario stratégique n'a été retenu à ce stade.")
+
+    document.add_heading("6.2 Formulations OPT'HELIOS appliquées", level=2)
+    if studio.formulations:
+        for idx, applied in enumerate(studio.formulations, start=1):
+            template = FORMULATIONS_BY_CODE.get(applied.code)
+            title = template.titre if template else applied.code
+            section = applied.section or (template.theme if template else "")
+            document.add_heading(f"{idx}. {title} — {section}".strip(" —"), level=3)
+
+            constat = applied.constat_personnalise or (template.constat if template else "")
+            impact = applied.impact_personnalise or (template.impact if template else "")
+            recommandation = applied.recommandation_personnalisee or (
+                template.recommandation if template else ""
+            )
+
+            if constat:
+                p = document.add_paragraph()
+                p.add_run("Constat : ").bold = True
+                p.add_run(_safe_str(constat))
+            if impact:
+                p = document.add_paragraph()
+                p.add_run("Impact : ").bold = True
+                p.add_run(_safe_str(impact))
+            if recommandation:
+                p = document.add_paragraph()
+                p.add_run("Recommandation : ").bold = True
+                p.add_run(_safe_str(recommandation))
+    else:
+        document.add_paragraph("Aucune formulation type OPT'HELIOS n'a été appliquée.")
+
+    if studio.note_strategique:
+        document.add_heading("6.3 Note stratégique", level=2)
+        document.add_paragraph(_safe_str(studio.note_strategique))
+
+
 def _add_appendix_metadata(document: Document, metadata: Mapping[str, Any] | None = None) -> None:
-    document.add_heading("6. Métadonnées", level=1)
+    document.add_heading("7. Métadonnées", level=1)
 
     if not metadata:
         document.add_paragraph("Aucune métadonnée d’audit disponible.")
@@ -409,6 +481,11 @@ def build_docx_report(
     document.add_page_break()
 
     _add_action_plan(document, payload)
+
+    studio = extract_studio_from_session(session_state)
+    if studio is not None:
+        document.add_page_break()
+        _add_studio_sections(document, studio)
 
     metadata = payload.get("metadata") or {}
     if metadata:

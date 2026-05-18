@@ -8,6 +8,7 @@ import streamlit as st
 
 from domain.docx_service import build_docx_report
 from domain.report_service import build_report_data, build_report_markdown
+from ui.studio_panel import render_studio_summary
 
 PAGE_TITLE = "06 - Export du rapport"
 SESSION_CONCLUSION_KEY = "synthese_conclusion_expert"
@@ -348,6 +349,10 @@ def main() -> None:
 
     _render_header(meta)
     _render_payload_overview(payload)
+
+    with st.expander("Studio OPT'HELIOS — synthèse rapide", expanded=False):
+        render_studio_summary()
+
     _render_export_checklist(meta, payload)
 
     tab1, tab2 = st.tabs(["Livrable DOCX", "Exports techniques"])
