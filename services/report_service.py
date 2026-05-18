@@ -4,6 +4,10 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from domain.audit_studio import (
+    extract_studio_from_session,
+    render_studio_markdown_lines,
+)
 from domain.control_catalog import Criticite, VerdictControle
 from domain.control_service import (
     build_action_plan,
@@ -463,5 +467,8 @@ def build_report_markdown(
             f"- {action['priorite']} | {action['controle_id']} | {action['section']} | "
             f"{action['objet']} | {action['action_recommandee']}"
         )
+
+    studio = extract_studio_from_session(session_state)
+    lines.extend(render_studio_markdown_lines(studio))
 
     return "\n".join(lines).strip()
