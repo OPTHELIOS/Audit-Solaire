@@ -9,6 +9,7 @@ import streamlit as st
 from domain.docx_service import build_docx_report
 from domain.report_service import build_report_data, build_report_markdown
 from repositories import onedrive_repository
+from services.onedrive_auth import OneDriveNotConfiguredError
 from ui.state import get_audit, save_audit
 from ui.studio_panel import render_studio_summary
 
@@ -348,6 +349,10 @@ def _render_onedrive_sync() -> None:
         try:
             results = onedrive_repository.upload_audit_evidences(audit, on_progress=_on_progress)
             save_audit(audit)
+        except OneDriveNotConfiguredError as exc:
+            progress.empty()
+            st.warning(str(exc))
+            return
         except Exception as exc:
             progress.empty()
             st.error(f"Authentification ou upload OneDrive impossible : {exc}")
