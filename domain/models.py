@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from domain.audit_studio import AuditStudioBlock, ModeRapport
 
@@ -192,6 +192,35 @@ class Audit(BaseModel):
     studio: AuditStudioBlock = Field(default_factory=AuditStudioBlock)
 
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_legacy_mode_rapport(cls, data: Any) -> Any:
+        # Legacy JSON may carry mode_rapport only at the root. Fold it into the
+        # studio block so studio.mode_rapport is the canonical source going forward.
+        if not isinstance(data, dict):
+            return data
+        root_mode = data.get("mode_rapport")
+        studio = data.get("studio")
+        if root_mode is not None and isinstance(studio, dict) and "mode_rapport" not in studio:
+            studio["mode_rapport"] = root_mode
+        elif root_mode is not None and studio is None:
+            data["studio"] = {"mode_rapport": root_mode}
+        return data
+
+    @model_validator(mode="after")
+    def _sync_mode_rapport(self) -> "Audit":
+        # Single source of truth: studio.mode_rapport. The root field mirrors it
+        # for backward-compatible reads and JSON exports.
+        if self.mode_rapport != self.studio.mode_rapport:
+            self.mode_rapport = self.studio.mode_rapport
+        return self
+
+    def set_mode_rapport(self, mode: ModeRapport) -> None:
+        # Always update via this helper so the root mirror stays in sync with the
+        # studio block between validation cycles.
+        self.studio.mode_rapport = mode
+        self.mode_rapport = mode
 # Alias de compatibilité avec l'ancien code
 Constat = ConstatControle
 AuditInfo = AuditMeta

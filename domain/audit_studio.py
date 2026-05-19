@@ -562,6 +562,83 @@ class AuditStudioBlock(BaseModel):
         return [sel for sel in self.scenarios if sel.retenu]
 
 
+def _lookup_audit(session_state) -> object:
+    """Récupère l'audit courant depuis différents types de container.
+
+    Supporte :
+    - ``st.session_state`` (objet avec ``.get`` style dict) ;
+    - mapping/dict simple ;
+    - objet exposant ``audit`` ou ``current_audit`` en attribut (compat ancien
+      code qui n'utilisait pas encore ``st.session_state``).
+    """
+
+    if session_state is None:
+        return None
+
+    get = getattr(session_state, "get", None)
+    if callable(get):
+        audit = get("audit")
+        if audit is None:
+            audit = get("current_audit")
+        if audit is not None:
+            return audit
+
+    for attr in ("audit", "current_audit"):
+        candidate = getattr(session_state, attr, None)
+        if candidate is not None:
+            return candidate
+
+    return None
+
+
+def render_studio_markdown_lines(studio: Optional["AuditStudioBlock"]) -> list[str]:
+    """Construit la section Markdown « Studio OPT'HELIOS » d'un rapport.
+
+    Renvoie une liste de lignes prête à être concaténée au reste du document.
+    Retourne une liste vide si le bloc studio est absent (rétrocompatibilité).
+    """
+
+    if studio is None:
+        return []
+
+    lines: list[str] = ["", "## Studio OPT'HELIOS"]
+    lines.append(
+        "Mode de rapport : "
+        + MODE_RAPPORT_LABELS.get(studio.mode_rapport.value, studio.mode_rapport.value)
+    )
+
+    selected = studio.selected_scenarios()
+    if selected:
+        lines.append("")
+        lines.append("### Scénarios retenus")
+        for sel in selected:
+            scenario = SCENARIOS_BY_CODE.get(sel.code)
+            title = scenario.libelle if scenario else sel.code
+            horizon = f" ({scenario.horizon})" if scenario and scenario.horizon else ""
+            lines.append(f"- **{title}**{horizon}")
+            if sel.commentaire:
+                lines.append(f"  - {sel.commentaire}")
+
+    if studio.formulations:
+        lines.append("")
+        lines.append("### Formulations OPT'HELIOS appliquées")
+        for applied in studio.formulations:
+            template = FORMULATIONS_BY_CODE.get(applied.code)
+            title = template.titre if template else applied.code
+            section = applied.section or (template.theme if template else "")
+            lines.append(f"- **{title}** — {section}")
+            constat = applied.constat_personnalise or (template.constat if template else "")
+            if constat:
+                lines.append(f"  - Constat : {constat}")
+
+    if studio.note_strategique:
+        lines.append("")
+        lines.append("### Note stratégique")
+        lines.append(studio.note_strategique)
+
+    return lines
+
+
 def extract_studio_from_session(session_state) -> Optional[AuditStudioBlock]:
     """Récupère proprement le bloc Studio depuis le ``st.session_state``.
 
@@ -569,12 +646,7 @@ def extract_studio_from_session(session_state) -> Optional[AuditStudioBlock]:
     issu d'un ancien JSON sans bloc studio (compatibilité ascendante).
     """
 
-    audit = None
-    try:
-        audit = session_state.get("audit")
-    except AttributeError:
-        return None
-
+    audit = _lookup_audit(session_state)
     if audit is None:
         return None
 

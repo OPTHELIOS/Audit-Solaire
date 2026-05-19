@@ -41,15 +41,11 @@ def _render_mode_section(studio: AuditStudioBlock) -> None:
 
     options = [m.value for m in ModeRapport]
     current = studio.mode_rapport.value if studio.mode_rapport else ModeRapport.audit_complet.value
-    try:
-        index = options.index(current)
-    except ValueError:
-        index = 0
+    st.session_state.setdefault("studio_mode_rapport", current)
 
     selected = st.radio(
         "Profil de livrable",
         options=options,
-        index=index,
         format_func=lambda code: MODE_RAPPORT_LABELS.get(code, code),
         horizontal=True,
         key="studio_mode_rapport",
@@ -58,9 +54,8 @@ def _render_mode_section(studio: AuditStudioBlock) -> None:
     st.caption(MODE_RAPPORT_DESCRIPTIONS.get(selected, ""))
 
     if selected != current:
-        studio.mode_rapport = ModeRapport(selected)
         audit = get_audit()
-        audit.mode_rapport = studio.mode_rapport
+        audit.set_mode_rapport(ModeRapport(selected))
         save_audit(audit)
 
 
@@ -97,15 +92,18 @@ def _render_scenarios_section(studio: AuditStudioBlock) -> None:
                 for risque in scenario.risques:
                     st.write(f"- {risque}")
 
+            retenu_key = f"studio_scenario_retenu_{scenario.code}"
+            comment_key = f"studio_scenario_comment_{scenario.code}"
+            st.session_state.setdefault(retenu_key, retenu_default)
+            st.session_state.setdefault(comment_key, commentaire_default)
+
             retenu = st.checkbox(
                 "Scénario retenu pour cet audit",
-                value=retenu_default,
-                key=f"studio_scenario_retenu_{scenario.code}",
+                key=retenu_key,
             )
             commentaire = st.text_area(
                 "Justification / contextualisation",
-                value=commentaire_default,
-                key=f"studio_scenario_comment_{scenario.code}",
+                key=comment_key,
                 height=80,
             )
 
@@ -121,8 +119,9 @@ def _render_formulations_section(studio: AuditStudioBlock) -> None:
         "précédents. Chaque formulation appliquée peut être personnalisée."
     )
 
+    st.session_state.setdefault("studio_formulations_search", "")
     query = st.text_input(
-        "Rechercher (titre, thème, mot-clé)", value="", key="studio_formulations_search"
+        "Rechercher (titre, thème, mot-clé)", key="studio_formulations_search"
     )
     results = search_formulations(query)
 
@@ -212,9 +211,9 @@ def _render_strategic_note(studio: AuditStudioBlock) -> None:
         "Texte libre qui sera intégré au rapport final pour expliciter le choix des "
         "scénarios et le positionnement OPT'HELIOS."
     )
+    st.session_state.setdefault("studio_note_strategique", studio.note_strategique)
     note = st.text_area(
         "Note stratégique",
-        value=studio.note_strategique,
         height=160,
         key="studio_note_strategique",
     )

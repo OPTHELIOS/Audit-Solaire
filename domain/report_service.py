@@ -5,10 +5,8 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from domain.audit_studio import (
-    FORMULATIONS_BY_CODE,
-    MODE_RAPPORT_LABELS,
-    SCENARIOS_BY_CODE,
     extract_studio_from_session,
+    render_studio_markdown_lines,
 )
 from domain.control_catalog import Criticite, VerdictControle
 from domain.control_service import (
@@ -432,41 +430,6 @@ def build_report_markdown(
         )
 
     studio = extract_studio_from_session(session_state)
-    if studio is not None:
-        lines.append("")
-        lines.append("## Studio OPT'HELIOS")
-        lines.append(
-            "Mode de rapport : "
-            + MODE_RAPPORT_LABELS.get(studio.mode_rapport.value, studio.mode_rapport.value)
-        )
-
-        selected = studio.selected_scenarios()
-        if selected:
-            lines.append("")
-            lines.append("### Scénarios retenus")
-            for sel in selected:
-                scenario = SCENARIOS_BY_CODE.get(sel.code)
-                title = scenario.libelle if scenario else sel.code
-                horizon = f" ({scenario.horizon})" if scenario and scenario.horizon else ""
-                lines.append(f"- **{title}**{horizon}")
-                if sel.commentaire:
-                    lines.append(f"  - {sel.commentaire}")
-
-        if studio.formulations:
-            lines.append("")
-            lines.append("### Formulations OPT'HELIOS appliquées")
-            for applied in studio.formulations:
-                template = FORMULATIONS_BY_CODE.get(applied.code)
-                title = template.titre if template else applied.code
-                section = applied.section or (template.theme if template else "")
-                lines.append(f"- **{title}** — {section}")
-                constat = applied.constat_personnalise or (template.constat if template else "")
-                if constat:
-                    lines.append(f"  - Constat : {constat}")
-
-        if studio.note_strategique:
-            lines.append("")
-            lines.append("### Note stratégique")
-            lines.append(studio.note_strategique)
+    lines.extend(render_studio_markdown_lines(studio))
 
     return "\n".join(lines).strip()
