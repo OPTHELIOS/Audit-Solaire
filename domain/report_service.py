@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from domain.audit_studio import (
+    ModeRapport,
     extract_studio_from_session,
     render_studio_markdown_lines,
 )
@@ -14,6 +15,7 @@ from domain.control_service import (
     extract_findings,
     summarize_controls,
 )
+from domain.energy import EnergyResults, format_results_markdown
 
 
 @dataclass
@@ -386,14 +388,44 @@ def generate_action_plan_table(
     return actions
 
 
-def build_report_markdown(
-    session_state: Any,
-    contexte_technique: Mapping[str, Any] | None = None,
-) -> str:
-    payload = build_report_data(session_state, contexte_technique=contexte_technique)
+def _resolve_audit_from_session(session_state: Any):
+    if session_state is None:
+        return None
+    if hasattr(session_state, "get"):
+        audit = session_state.get("audit") or session_state.get("current_audit")
+        if audit is not None:
+            return audit
+    return getattr(session_state, "audit", None) or getattr(session_state, "current_audit", None)
 
+
+def _resolve_mode_rapport(session_state: Any) -> ModeRapport:
+    audit = _resolve_audit_from_session(session_state)
+    if audit is None:
+        return ModeRapport.audit_complet
+    studio = getattr(audit, "studio", None)
+    if studio is not None and getattr(studio, "mode_rapport", None):
+        return studio.mode_rapport
+    return getattr(audit, "mode_rapport", ModeRapport.audit_complet)
+
+
+def _energy_markdown_lines(session_state: Any) -> list[str]:
+    audit = _resolve_audit_from_session(session_state)
+    if audit is None:
+        return []
+    energy = getattr(audit, "energy", None)
+    results = getattr(energy, "results", None) if energy is not None else None
+    if not isinstance(results, EnergyResults):
+        return []
+    return format_results_markdown(results)
+
+
+def _markdown_audit_complet(
+    session_state: Any,
+    payload: dict[str, Any],
+    contexte_technique: Mapping[str, Any] | None,
+) -> str:
     lines: list[str] = []
-    lines.append("# Rapport d’audit technique")
+    lines.append("# Rapport d'audit technique solaire thermique")
     lines.append("")
     lines.append("## Synthèse")
     for item in payload["executive_summary"]:
@@ -422,14 +454,104 @@ def build_report_markdown(
             lines.append(f"- {paragraph}")
         lines.append("")
 
-    lines.append("## Plan d’actions")
+    lines.append("## Plan d'actions")
     for action in payload["action_plan"]:
         lines.append(
             f"- {action['priorite']} | {action['controle_id']} | {action['section']} | "
             f"{action['objet']} | {action['action_recommandee']}"
         )
 
+    lines.extend(_energy_markdown_lines(session_state))
+
     studio = extract_studio_from_session(session_state)
     lines.extend(render_studio_markdown_lines(studio))
 
     return "\n".join(lines).strip()
+
+
+def _markdown_diagnostic_court(
+    session_state: Any,
+    payload: dict[str, Any],
+) -> str:
+    lines: list[str] = []
+    lines.append("# Diagnostic court — installation solaire thermique")
+    lines.append("")
+    lines.append("## Appréciation globale")
+    ga = payload["global_assessment"]
+    lines.append(f"**Statut** : {ga.get('statut_global', '')}")
+    lines.append("")
+    lines.append(ga.get("commentaire_global", ""))
+
+    lines.append("")
+    lines.append("## Synthèse exécutive")
+    for item in payload["executive_summary"]:
+        lines.append(f"- {item}")
+
+    actions = payload.get("action_plan", [])
+    p1 = sum(1 for a in actions if a["priorite"] == "P1")
+    p2 = sum(1 for a in actions if a["priorite"] == "P2")
+    p3 = sum(1 for a in actions if a["priorite"] == "P3")
+    lines.append("")
+    lines.append("## Tableau priorisé et chiffré")
+    lines.append(f"- **P1 (urgent)** : {p1} action(s)")
+    lines.append(f"- **P2** : {p2} action(s)")
+    lines.append(f"- **P3** : {p3} action(s)")
+    if actions:
+        lines.append("")
+        lines.append("| Priorité | Section | Objet | Action |")
+        lines.append("|---|---|---|---|")
+        for action in actions:
+            if action["priorite"] not in {"P1", "P2"}:
+                continue
+            lines.append(
+                f"| {action['priorite']} | {action['section']} | "
+                f"{action['objet']} | {action['action_recommandee']} |"
+            )
+
+    lines.append("")
+    lines.append("## Constats essentiels")
+    essentials = [
+        f for f in payload.get("findings_flat", [])
+        if f["criticite"] in {Criticite.critique.value, Criticite.majeure.value}
+    ]
+    if essentials:
+        for finding in essentials[:10]:
+            lines.append(f"- **{finding['controle_id']}** — {finding['libelle']} : {finding['phrase_constat']}")
+    else:
+        lines.append("- Aucun constat critique ou majeur n'a été remonté à ce stade.")
+
+    lines.extend(_energy_markdown_lines(session_state))
+
+    audit = _resolve_audit_from_session(session_state)
+    if audit is not None:
+        photos = [
+            p for p in (audit.preuves or [])
+            if getattr(getattr(p, "type_preuve", None), "value", None) == "photo"
+        ]
+        if photos:
+            lines.append("")
+            lines.append("## Photos clés")
+            for preuve in photos[:4]:
+                caption = preuve.legende or preuve.commentaire or "(sans légende)"
+                lines.append(f"- {preuve.chemin_fichier or preuve.nom_fichier or '-'} — {caption}")
+
+    studio = extract_studio_from_session(session_state)
+    if studio is not None:
+        lines.extend(render_studio_markdown_lines(studio))
+
+    lines.append("")
+    lines.append("## Conclusion opérationnelle")
+    lines.append(ga.get("commentaire_global", ""))
+
+    return "\n".join(lines).strip()
+
+
+def build_report_markdown(
+    session_state: Any,
+    contexte_technique: Mapping[str, Any] | None = None,
+) -> str:
+    payload = build_report_data(session_state, contexte_technique=contexte_technique)
+    mode = _resolve_mode_rapport(session_state)
+    if mode == ModeRapport.diagnostic_court:
+        return _markdown_diagnostic_court(session_state, payload)
+    return _markdown_audit_complet(session_state, payload, contexte_technique)

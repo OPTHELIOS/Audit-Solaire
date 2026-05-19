@@ -1,10 +1,12 @@
 import json
+import mimetypes
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List, Dict
 
 import requests
 
-from domain.models import Audit
+from domain.models import Audit, Preuve
 from services.onedrive_auth import get_access_token
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -25,6 +27,17 @@ def _upload_text(token: str, relative_path: str, content: str) -> None:
         headers=_headers(token, "text/plain; charset=utf-8"),
         data=content.encode("utf-8"),
         timeout=60,
+    )
+    response.raise_for_status()
+
+
+def _upload_binary(token: str, relative_path: str, content: bytes, mime_type: str) -> None:
+    url = f"{APP_ROOT}:/{relative_path}:/content"
+    response = requests.put(
+        url,
+        headers=_headers(token, mime_type),
+        data=content,
+        timeout=120,
     )
     response.raise_for_status()
 
@@ -90,6 +103,97 @@ def save_audit(audit: Audit) -> str:
     _upload_text(token, f"{base_path}/metadata.json", metadata_json)
 
     return audit_id
+
+
+def _resolve_audit_id(audit: Audit) -> str:
+    numero_audit = getattr(audit.meta, "numero_audit", None)
+    if numero_audit:
+        return str(numero_audit).replace("/", "-").replace("\\", "-").strip()
+    return f"audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+
+def upload_audit_evidences(
+    audit: Audit,
+    *,
+    token: Optional[str] = None,
+    on_progress=None,
+) -> List[Dict]:
+    """Synchronise les preuves (photos / documents) d'un audit sur OneDrive.
+
+    Pour chaque preuve disposant d'un fichier local existant, le contenu est
+    uploadé sous ``audits/<audit_id>/evidences/<type>/<nom>``. Le champ
+    ``onedrive_path`` de la preuve est mis à jour avec le chemin distant relatif.
+    Les preuves sans fichier local exploitable sont ignorées sans erreur.
+
+    Args:
+        audit: Audit dont les preuves doivent être synchronisées.
+        token: token OAuth déjà obtenu (utile pour les tests / les appels en
+            boucle). Si ``None``, ``get_access_token`` est invoqué.
+        on_progress: callback optionnel ``(index, total, preuve)`` appelé après
+            chaque upload.
+
+    Returns:
+        Liste de dictionnaires décrivant chaque preuve traitée
+        (``preuve_id``, ``status``, ``onedrive_path``, ``reason``).
+    """
+
+    token = token or get_access_token()
+    audit_id = _resolve_audit_id(audit)
+    base_path = f"audits/{audit_id}/evidences"
+    results: List[Dict] = []
+    total = len(audit.preuves)
+
+    for index, preuve in enumerate(audit.preuves, start=1):
+        local_path = preuve.chemin_fichier
+        if not local_path:
+            results.append({
+                "preuve_id": preuve.preuve_id,
+                "status": "skipped",
+                "reason": "Aucun chemin local renseigné.",
+                "onedrive_path": None,
+            })
+            continue
+
+        path_obj = Path(local_path)
+        if not path_obj.exists() or not path_obj.is_file():
+            results.append({
+                "preuve_id": preuve.preuve_id,
+                "status": "skipped",
+                "reason": f"Fichier local introuvable : {local_path}",
+                "onedrive_path": None,
+            })
+            continue
+
+        type_value = getattr(preuve.type_preuve, "value", str(preuve.type_preuve))
+        relative = f"{base_path}/{type_value}/{path_obj.name}"
+        mime_type, _ = mimetypes.guess_type(path_obj.name)
+        mime_type = mime_type or "application/octet-stream"
+
+        try:
+            _upload_binary(token, relative, path_obj.read_bytes(), mime_type)
+        except Exception as exc:
+            results.append({
+                "preuve_id": preuve.preuve_id,
+                "status": "error",
+                "reason": str(exc),
+                "onedrive_path": None,
+            })
+            if callable(on_progress):
+                on_progress(index, total, preuve)
+            continue
+
+        preuve.onedrive_path = relative
+        results.append({
+            "preuve_id": preuve.preuve_id,
+            "status": "uploaded",
+            "reason": "",
+            "onedrive_path": relative,
+        })
+
+        if callable(on_progress):
+            on_progress(index, total, preuve)
+
+    return results
 
 
 def load_audit(audit_id: str) -> Optional[Audit]:
