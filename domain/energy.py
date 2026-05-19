@@ -69,32 +69,43 @@ class EnergyInputs(BaseModel):
     Tous les champs sont optionnels — les fonctions renvoient ``None`` pour les
     grandeurs qu'elles ne peuvent pas calculer faute de donnée. Cela permet
     d'intégrer le module dans une UI où l'utilisateur saisit progressivement.
+    Les bornes Pydantic restent volontairement larges pour ne pas rejeter une
+    saisie en cours, tout en interceptant les valeurs aberrantes (négatives,
+    rendement > 1, deltaT > 100 K, jours hors plage annuelle).
     """
 
     volume_ecs_jour_litres: Optional[float] = Field(
         default=None,
+        ge=0,
         description="Volume d'eau chaude sanitaire consommé en moyenne par jour (L/jour).",
     )
     delta_t_kelvin: Optional[float] = Field(
         default=40.0,
-        description="Écart de température eau froide → eau chaude (K).",
+        ge=0,
+        le=100,
+        description="Écart de température eau froide → eau chaude (K, 0..100).",
     )
     jours_fonctionnement: int = Field(
         default=JOURS_PAR_AN,
-        description="Nombre de jours de fonctionnement effectif sur l'année.",
+        ge=0,
+        le=366,
+        description="Nombre de jours de fonctionnement effectif sur l'année (0..366).",
     )
 
     surface_capteurs_m2: Optional[float] = Field(
         default=None,
+        ge=0,
         description="Surface utile du champ capteurs (m²).",
     )
     volume_stockage_solaire_litres: Optional[float] = Field(
         default=None,
+        ge=0,
         description="Volume total du stockage solaire (L).",
     )
 
     productible_indicatif_kwh_m2_an: Optional[float] = Field(
         default=None,
+        ge=0,
         description=(
             "Productible solaire indicatif retenu (kWh/m².an). Si absent, "
             "il est dérivé de la zone climatique ou de la valeur par défaut."
@@ -107,10 +118,12 @@ class EnergyInputs(BaseModel):
 
     rendement_utile: float = Field(
         default=0.90,
+        ge=0.0,
+        le=1.0,
         description=(
             "Rendement utile global appliqué au productible théorique pour "
             "passer en énergie effectivement valorisée côté ECS (pertes "
-            "primaires, échangeur, distribution)."
+            "primaires, échangeur, distribution). Doit être compris entre 0 et 1."
         ),
     )
 
@@ -223,7 +236,15 @@ def evaluer_redimensionnement(
             "Taux de couverture solaire non calculable faute de données ECS suffisantes."
         )
     else:
-        if couverture > COUVERTURE_MAX:
+        if couverture > 1.0:
+            label = "incoherent"
+            messages.append(
+                f"Taux de couverture estimé à {couverture * 100:.0f} % "
+                "(> 100 %) — vérifier la saisie (volume ECS / ΔT / surface) ou "
+                "le dimensionnement : l'énergie solaire utile ne peut pas "
+                "dépasser le besoin ECS annuel."
+            )
+        elif couverture > COUVERTURE_MAX:
             label = "surdimensionné"
             messages.append(
                 f"Taux de couverture estimé à {couverture * 100:.0f} % "
@@ -326,6 +347,26 @@ def compute_energy(inputs: EnergyInputs) -> EnergyResults:
     )
 
 
+def inputs_have_payload(inputs: Optional[EnergyInputs]) -> bool:
+    """True si au moins une grandeur saisissable est renseignée non triviale.
+
+    Utilisé par les exports DOCX / Markdown pour décider s'il faut auto-calculer
+    `results` quand l'utilisateur a saisi des entrées mais n'a pas explicitement
+    déclenché le calcul depuis l'UI.
+    """
+    if inputs is None:
+        return False
+    return any(
+        v is not None and v > 0
+        for v in (
+            inputs.volume_ecs_jour_litres,
+            inputs.surface_capteurs_m2,
+            inputs.volume_stockage_solaire_litres,
+            inputs.productible_indicatif_kwh_m2_an,
+        )
+    )
+
+
 def format_results_markdown(results: EnergyResults) -> list[str]:
     """Sérialise les résultats en lignes Markdown pour les exports."""
 
@@ -343,7 +384,13 @@ def format_results_markdown(results: EnergyResults) -> list[str]:
         f"- Productivité spécifique : {_fmt(results.productivite_kwh_m2_an, 'kWh/m².an')}",
     ]
     if results.taux_couverture is not None:
-        lines.append(f"- Taux de couverture solaire : {results.taux_couverture * 100:.0f} %")
+        if results.taux_couverture > 1.0:
+            lines.append(
+                f"- Taux de couverture solaire : {results.taux_couverture * 100:.0f} % "
+                "— **> 100 %, vérifier la saisie ou le dimensionnement**"
+            )
+        else:
+            lines.append(f"- Taux de couverture solaire : {results.taux_couverture * 100:.0f} %")
     else:
         lines.append("- Taux de couverture solaire : non calculé")
     if results.ratio_stockage_l_m2 is not None:

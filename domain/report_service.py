@@ -15,7 +15,12 @@ from domain.control_service import (
     extract_findings,
     summarize_controls,
 )
-from domain.energy import EnergyResults, format_results_markdown
+from domain.energy import (
+    EnergyResults,
+    compute_energy,
+    format_results_markdown,
+    inputs_have_payload,
+)
 
 
 @dataclass
@@ -413,9 +418,18 @@ def _energy_markdown_lines(session_state: Any) -> list[str]:
     if audit is None:
         return []
     energy = getattr(audit, "energy", None)
-    results = getattr(energy, "results", None) if energy is not None else None
-    if not isinstance(results, EnergyResults):
+    if energy is None:
         return []
+    results = getattr(energy, "results", None)
+    inputs = getattr(energy, "inputs", None)
+    if not isinstance(results, EnergyResults):
+        # Auto-calcul si l'utilisateur a saisi des entrées mais n'a pas
+        # déclenché le calcul depuis l'UI : évite une section énergie vide.
+        if inputs_have_payload(inputs):
+            results = compute_energy(inputs)
+            energy.results = results
+        else:
+            return []
     return format_results_markdown(results)
 
 

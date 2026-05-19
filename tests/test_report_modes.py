@@ -116,6 +116,56 @@ class TestDocxModes(unittest.TestCase):
         self.assertIn("Énergie ECS annuelle", texts)
 
 
+class TestEnergyAutoCompute(unittest.TestCase):
+    """Auto-calcul si inputs présents mais results absent (évite section vide)."""
+
+    def _audit_with_inputs_no_results(self) -> Audit:
+        audit = Audit()
+        audit.meta.numero_audit = "AUD-AUTO"
+        audit.projet.operation = "Site auto"
+        audit.energy.inputs = EnergyInputs(
+            volume_ecs_jour_litres=1500,
+            delta_t_kelvin=40,
+            surface_capteurs_m2=20,
+            volume_stockage_solaire_litres=1500,
+            zone_climatique="H2",
+        )
+        audit.energy.results = None
+        return audit
+
+    def test_markdown_auto_computes_energy(self) -> None:
+        audit = self._audit_with_inputs_no_results()
+        md = build_report_markdown({"audit": audit})
+        self.assertIn("Calculs énergétiques", md)
+        self.assertIn("Énergie ECS annuelle", md)
+        # After auto-compute, results should be populated on the audit too.
+        self.assertIsNotNone(audit.energy.results)
+
+    def test_docx_auto_computes_energy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            audit = self._audit_with_inputs_no_results()
+            output = Path(tmp) / "auto.docx"
+            build_docx_report({"audit": audit}, output)
+            doc = Document(str(output))
+            parts = [p.text for p in doc.paragraphs]
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        parts.append(cell.text)
+            text = "\n".join(parts)
+            self.assertIn("Calculs énergétiques", text)
+            self.assertIn("Énergie ECS annuelle", text)
+            self.assertIsNotNone(audit.energy.results)
+
+    def test_no_section_when_no_inputs(self) -> None:
+        # Empty inputs (nothing to compute) -> no energy section in markdown.
+        audit = Audit()
+        audit.meta.numero_audit = "AUD-EMPTY"
+        audit.projet.operation = "Site vide"
+        md = build_report_markdown({"audit": audit})
+        self.assertNotIn("## Calculs énergétiques", md)
+
+
 class TestPhotoCaptions(unittest.TestCase):
     def test_caption_appears_in_diagnostic_markdown(self) -> None:
         audit = _build_audit(ModeRapport.diagnostic_court)

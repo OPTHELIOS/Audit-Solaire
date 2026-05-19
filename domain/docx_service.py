@@ -19,7 +19,7 @@ from domain.audit_studio import (
     ModeRapport,
     extract_studio_from_session,
 )
-from domain.energy import EnergyResults
+from domain.energy import EnergyResults, compute_energy, inputs_have_payload
 from domain.report_service import build_report_data
 
 
@@ -652,9 +652,17 @@ def _add_energy_section(document: Document, audit: Any) -> None:
     if audit is None:
         return
     energy_block = getattr(audit, "energy", None)
-    results = getattr(energy_block, "results", None) if energy_block else None
-    if not isinstance(results, EnergyResults):
+    if energy_block is None:
         return
+    results = getattr(energy_block, "results", None)
+    inputs = getattr(energy_block, "inputs", None)
+    if not isinstance(results, EnergyResults):
+        # Auto-calcul si des entrées ont été saisies sans déclenchement explicite.
+        if inputs_have_payload(inputs):
+            results = compute_energy(inputs)
+            energy_block.results = results
+        else:
+            return
 
     document.add_heading("Calculs énergétiques", level=1)
 
@@ -676,10 +684,15 @@ def _add_energy_section(document: Document, audit: Any) -> None:
     _row("Productible solaire retenu", _fmt(results.productible_retenu_kwh_m2_an, "kWh/m².an"))
     _row("Énergie solaire utile estimée", _fmt(results.energie_solaire_utile_kwh_an, "kWh/an"))
     _row("Productivité spécifique", _fmt(results.productivite_kwh_m2_an, "kWh/m².an"))
-    _row(
-        "Taux de couverture solaire",
-        f"{results.taux_couverture * 100:.0f} %" if results.taux_couverture is not None else "non calculé",
-    )
+    if results.taux_couverture is None:
+        _row("Taux de couverture solaire", "non calculé")
+    elif results.taux_couverture > 1.0:
+        _row(
+            "Taux de couverture solaire",
+            f"{results.taux_couverture * 100:.0f} % — > 100 %, vérifier saisie / dimensionnement",
+        )
+    else:
+        _row("Taux de couverture solaire", f"{results.taux_couverture * 100:.0f} %")
     _row(
         "Ratio stockage",
         f"{results.ratio_stockage_l_m2:.0f} L/m²" if results.ratio_stockage_l_m2 is not None else "non calculé",

@@ -1,6 +1,7 @@
 import streamlit as st
 
 from services.audit_service import touch_audit
+from ui.energy_panel import render as render_energy_panel
 from ui.state import get_audit, save_audit
 
 
@@ -353,3 +354,6 @@ def render():
     if submitted:
         _save_installation(audit)
         st.success("Installation enregistrée.")
+
+    st.markdown("---")
+    render_energy_panel()

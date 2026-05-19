@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import ValidationError
+
 from domain.energy import (
     COUVERTURE_MAX,
     COUVERTURE_MIN,
@@ -16,6 +18,7 @@ from domain.energy import (
     energie_ecs_annuelle_kwh,
     evaluer_redimensionnement,
     format_results_markdown,
+    inputs_have_payload,
     productible_retenu_kwh_m2_an,
     productivite_kwh_m2_an,
     ratio_stockage_l_m2,
@@ -207,6 +210,84 @@ class TestEnergyAuditIntegration(unittest.TestCase):
         self.assertIsNotNone(rebuilt.energy.results)
         assert rebuilt.energy.results is not None  # type narrowing
         self.assertIsNotNone(rebuilt.energy.results.energie_ecs_kwh_an)
+
+
+class TestEnergyInputsBounds(unittest.TestCase):
+    def test_rendement_must_be_within_zero_one(self) -> None:
+        EnergyInputs(rendement_utile=0.0)
+        EnergyInputs(rendement_utile=1.0)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(rendement_utile=1.5)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(rendement_utile=-0.1)
+
+    def test_delta_t_within_zero_hundred(self) -> None:
+        EnergyInputs(delta_t_kelvin=0)
+        EnergyInputs(delta_t_kelvin=100)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(delta_t_kelvin=150)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(delta_t_kelvin=-1)
+
+    def test_jours_within_zero_366(self) -> None:
+        EnergyInputs(jours_fonctionnement=0)
+        EnergyInputs(jours_fonctionnement=366)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(jours_fonctionnement=400)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(jours_fonctionnement=-1)
+
+    def test_volumes_and_surface_must_be_non_negative(self) -> None:
+        with self.assertRaises(ValidationError):
+            EnergyInputs(volume_ecs_jour_litres=-10)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(surface_capteurs_m2=-1)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(volume_stockage_solaire_litres=-50)
+        with self.assertRaises(ValidationError):
+            EnergyInputs(productible_indicatif_kwh_m2_an=-1)
+
+
+class TestCoverageOverOneHundred(unittest.TestCase):
+    def test_label_incoherent_above_100_percent(self) -> None:
+        label, msgs = evaluer_redimensionnement(1.5, 70.0)
+        self.assertEqual(label, "incoherent")
+        self.assertTrue(any("100" in m and "vérifier" in m.lower() for m in msgs))
+
+    def test_markdown_flags_over_100_percent(self) -> None:
+        inputs = EnergyInputs(
+            volume_ecs_jour_litres=100,
+            delta_t_kelvin=40,
+            surface_capteurs_m2=200,  # surface absurdement grande -> couverture > 100%
+            zone_climatique="H3",
+        )
+        results = compute_energy(inputs)
+        self.assertIsNotNone(results.taux_couverture)
+        assert results.taux_couverture is not None
+        self.assertGreater(results.taux_couverture, 1.0)
+        lines = format_results_markdown(results)
+        joined = "\n".join(lines)
+        self.assertIn("> 100", joined)
+        self.assertIn("vérifier", joined.lower())
+
+    def test_label_stays_oversized_just_above_max(self) -> None:
+        # Au-dessus de COUVERTURE_MAX mais sous 100 % -> garde surdimensionné
+        label, _ = evaluer_redimensionnement(0.75, 70.0)
+        self.assertEqual(label, "surdimensionné")
+
+
+class TestInputsHavePayload(unittest.TestCase):
+    def test_empty_inputs_is_no_payload(self) -> None:
+        self.assertFalse(inputs_have_payload(EnergyInputs()))
+
+    def test_volume_alone_counts_as_payload(self) -> None:
+        self.assertTrue(inputs_have_payload(EnergyInputs(volume_ecs_jour_litres=500)))
+
+    def test_surface_alone_counts_as_payload(self) -> None:
+        self.assertTrue(inputs_have_payload(EnergyInputs(surface_capteurs_m2=10)))
+
+    def test_none_inputs(self) -> None:
+        self.assertFalse(inputs_have_payload(None))
 
 
 if __name__ == "__main__":

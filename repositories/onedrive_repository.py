@@ -1,5 +1,6 @@
 import json
 import mimetypes
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -11,6 +12,26 @@ from services.onedrive_auth import get_access_token
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 APP_ROOT = f"{GRAPH_BASE}/me/drive/special/approot"
+
+# OneDrive interdit ces caractères dans les noms de fichiers ou de dossiers.
+_FORBIDDEN_PATH_CHARS = re.compile(r'[<>:"|?*\x00-\x1f]')
+
+
+def _sanitize_path_segment(segment: str, fallback: str = "audit") -> str:
+    """Nettoie un segment de chemin OneDrive.
+
+    - élimine ``..`` et séparateurs de chemin pour éviter toute remontée ;
+    - remplace les caractères interdits par ``_`` ;
+    - replie les espaces ;
+    - garantit une valeur non vide.
+    """
+    if not segment:
+        return fallback
+    cleaned = str(segment).replace("\\", "/").replace("..", "_")
+    cleaned = cleaned.replace("/", "-")
+    cleaned = _FORBIDDEN_PATH_CHARS.sub("_", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return cleaned or fallback
 
 
 def _headers(token: str, content_type: str = "application/json") -> dict:
@@ -77,10 +98,8 @@ def save_audit(audit: Audit) -> str:
     numero_audit = getattr(audit.meta, "numero_audit", None)
     date_audit = getattr(audit.meta, "date_audit", None)
 
-    if numero_audit:
-        audit_id = str(numero_audit).replace("/", "-").replace("\\", "-").strip()
-    else:
-        audit_id = f"audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    fallback = f"audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    audit_id = _sanitize_path_segment(numero_audit or "", fallback=fallback)
 
     base_path = f"audits/{audit_id}"
 
@@ -107,9 +126,21 @@ def save_audit(audit: Audit) -> str:
 
 def _resolve_audit_id(audit: Audit) -> str:
     numero_audit = getattr(audit.meta, "numero_audit", None)
-    if numero_audit:
-        return str(numero_audit).replace("/", "-").replace("\\", "-").strip()
-    return f"audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    fallback = f"audit-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return _sanitize_path_segment(numero_audit or "", fallback=fallback)
+
+
+def _build_evidence_remote_name(preuve: Preuve, index: int, local_path: Path) -> str:
+    """Génère un nom de fichier distant stable et sans collision.
+
+    Préfixe ``<index>-<preuve_id sanitized>__<basename>`` pour garantir
+    qu'aucun upload n'en écrase un autre quand deux preuves partagent
+    le même nom de fichier local (ex. plusieurs ``photo.jpg``).
+    """
+    base_name = _sanitize_path_segment(local_path.name, fallback="preuve.bin")
+    preuve_slug = _sanitize_path_segment(preuve.preuve_id or "", fallback="preuve")
+    ordre = preuve.ordre if isinstance(preuve.ordre, int) and preuve.ordre > 0 else index
+    return f"{ordre:03d}-{preuve_slug}__{base_name}"
 
 
 def upload_audit_evidences(
@@ -165,7 +196,9 @@ def upload_audit_evidences(
             continue
 
         type_value = getattr(preuve.type_preuve, "value", str(preuve.type_preuve))
-        relative = f"{base_path}/{type_value}/{path_obj.name}"
+        type_segment = _sanitize_path_segment(str(type_value), fallback="autre")
+        remote_name = _build_evidence_remote_name(preuve, index, path_obj)
+        relative = f"{base_path}/{type_segment}/{remote_name}"
         mime_type, _ = mimetypes.guess_type(path_obj.name)
         mime_type = mime_type or "application/octet-stream"
 

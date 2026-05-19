@@ -135,6 +135,76 @@ class TestUploadAuditEvidences(unittest.TestCase):
         self.assertTrue((self.tmp_path / "site_chaufferie.jpg").exists())
         self.assertTrue((self.tmp_path / "schema.pdf").exists())
 
+    def test_collision_basenames_yield_unique_remote_paths(self) -> None:
+        # Two preuves sharing the same local basename must not overwrite each other.
+        sub_a = self.tmp_path / "a"
+        sub_b = self.tmp_path / "b"
+        sub_a.mkdir()
+        sub_b.mkdir()
+        (sub_a / "photo.jpg").write_bytes(b"a-bytes")
+        (sub_b / "photo.jpg").write_bytes(b"b-bytes")
+
+        audit = Audit()
+        audit.meta.numero_audit = "AUD-COLLIDE"
+        audit.preuves.append(
+            Preuve(
+                preuve_id="PRV-A",
+                type_preuve=TypePreuve.photo,
+                nom_fichier="photo.jpg",
+                chemin_fichier=str(sub_a / "photo.jpg"),
+                ordre=1,
+            )
+        )
+        audit.preuves.append(
+            Preuve(
+                preuve_id="PRV-B",
+                type_preuve=TypePreuve.photo,
+                nom_fichier="photo.jpg",
+                chemin_fichier=str(sub_b / "photo.jpg"),
+                ordre=2,
+            )
+        )
+
+        urls: list[str] = []
+
+        def _put(url, **kwargs):
+            urls.append(url)
+            return _FakeResponse(200)
+
+        with patch.object(onedrive_repository.requests, "put", side_effect=_put):
+            onedrive_repository.upload_audit_evidences(audit, token="fake-token")
+
+        paths = [p.onedrive_path for p in audit.preuves]
+        self.assertEqual(len(set(paths)), 2)
+        self.assertEqual(len(set(urls)), 2)
+        for path in paths:
+            assert path is not None
+            self.assertTrue(path.endswith("photo.jpg"))
+            self.assertIn("PRV-", path)
+
+    def test_audit_id_sanitization_blocks_path_traversal(self) -> None:
+        audit = Audit()
+        audit.meta.numero_audit = "../../etc/passwd"
+        photo = self.tmp_path / "x.jpg"
+        photo.write_bytes(b"x")
+        audit.preuves.append(
+            Preuve(
+                preuve_id="PRV-X",
+                type_preuve=TypePreuve.photo,
+                chemin_fichier=str(photo),
+            )
+        )
+
+        with patch.object(onedrive_repository.requests, "put", return_value=_FakeResponse(200)):
+            onedrive_repository.upload_audit_evidences(audit, token="fake-token")
+
+        path = audit.preuves[0].onedrive_path
+        assert path is not None
+        # No upward traversal should remain in the remote path.
+        self.assertNotIn("..", path)
+        self.assertNotIn("/etc/", path)
+        self.assertTrue(path.startswith("audits/"))
+
 
 class TestPreuveModelExtensions(unittest.TestCase):
     def test_extra_fields_persist_in_roundtrip(self) -> None:
