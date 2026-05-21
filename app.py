@@ -11,6 +11,7 @@ import ui.pages._05_synthese as _05_synthese
 import ui.pages._06_export as _06_export
 
 from repositories.onedrive_repository import list_audits, load_audit, save_audit
+from services.onedrive_auth import OneDriveNotConfiguredError
 from ui.state import get_audit, init_session_state, save_audit as save_audit_session
 
 
@@ -70,13 +71,25 @@ def render_infos_audit() -> None:
     with col2:
         if st.button("Sauvegarder dans OneDrive", type="primary"):
             save_audit_session(audit)
-            audit_id = save_audit(audit)
-            st.success(f"Audit sauvegardé dans OneDrive : {audit_id}")
+            try:
+                audit_id = save_audit(audit)
+                st.success(f"Audit sauvegardé dans OneDrive : {audit_id}")
+            except OneDriveNotConfiguredError as exc:
+                st.warning(str(exc))
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Échec sauvegarde OneDrive : {exc}")
 
     st.divider()
     st.subheader("Reprendre un audit sauvegardé")
 
-    audits = list_audits()
+    try:
+        audits = list_audits()
+    except OneDriveNotConfiguredError as exc:
+        st.info(str(exc))
+        return
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Impossible de lister les audits OneDrive : {exc}")
+        return
 
     if not audits:
         st.info("Aucun audit sauvegardé dans OneDrive.")
@@ -97,7 +110,14 @@ def render_infos_audit() -> None:
     )
 
     if st.button("Ouvrir l'audit sélectionné"):
-        loaded_audit = load_audit(options[selected_label])
+        try:
+            loaded_audit = load_audit(options[selected_label])
+        except OneDriveNotConfiguredError as exc:
+            st.warning(str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Échec du chargement OneDrive : {exc}")
+            return
 
         if loaded_audit is None:
             st.error("Impossible de charger cet audit depuis OneDrive.")

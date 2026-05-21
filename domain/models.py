@@ -7,6 +7,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from domain.audit_studio import AuditStudioBlock, ModeRapport
+from domain.energy import EnergyInputs, EnergyResults
 
 
 class StatutAudit(str, Enum):
@@ -149,10 +150,15 @@ class Preuve(BaseModel):
     nom_fichier: Optional[str] = None
     chemin_fichier: Optional[str] = None
     section: Optional[str] = None
+    rubrique: Optional[str] = None
     controle_id: Optional[str] = None
     legende: Optional[str] = None
     commentaire: Optional[str] = None
+    ordre: int = 0
+    onedrive_path: Optional[str] = None
     date_ajout: datetime = Field(default_factory=datetime.now)
+
+    model_config = {"extra": "ignore"}
 
 
 class ConstatControle(BaseModel):
@@ -181,6 +187,15 @@ class SyntheseAudit(BaseModel):
     priorites_p3: list[str] = Field(default_factory=list)
 
 
+class EnergyBlock(BaseModel):
+    """Conteneur des entrées et résultats de calculs énergétiques d'un audit."""
+
+    inputs: EnergyInputs = Field(default_factory=EnergyInputs)
+    results: Optional[EnergyResults] = None
+
+    model_config = {"extra": "ignore"}
+
+
 class Audit(BaseModel):
     meta: AuditMeta = Field(default_factory=AuditMeta)
     projet: Projet = Field(default_factory=Projet)
@@ -190,6 +205,7 @@ class Audit(BaseModel):
     synthese: SyntheseAudit = Field(default_factory=SyntheseAudit)
     mode_rapport: ModeRapport = ModeRapport.audit_complet
     studio: AuditStudioBlock = Field(default_factory=AuditStudioBlock)
+    energy: EnergyBlock = Field(default_factory=EnergyBlock)
 
     model_config = {"extra": "ignore"}
 

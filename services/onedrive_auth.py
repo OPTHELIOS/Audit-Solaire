@@ -9,8 +9,37 @@ SCOPES = [
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 
 
+class OneDriveNotConfiguredError(RuntimeError):
+    """Levée quand les secrets Microsoft / OneDrive ne sont pas configurés."""
+
+
+def _read_client_id() -> str:
+    try:
+        microsoft = st.secrets["microsoft"]
+    except Exception as exc:
+        raise OneDriveNotConfiguredError(
+            "OneDrive non configuré : ajoute la section [microsoft] avec "
+            "`client_id` dans `.streamlit/secrets.toml`."
+        ) from exc
+
+    try:
+        client_id = microsoft["client_id"]
+    except Exception as exc:
+        raise OneDriveNotConfiguredError(
+            "OneDrive non configuré : la clé `microsoft.client_id` est absente "
+            "de `.streamlit/secrets.toml`."
+        ) from exc
+
+    if not client_id:
+        raise OneDriveNotConfiguredError(
+            "OneDrive non configuré : `microsoft.client_id` est vide."
+        )
+
+    return str(client_id)
+
+
 def get_msal_app() -> msal.PublicClientApplication:
-    client_id = st.secrets["microsoft"]["client_id"]
+    client_id = _read_client_id()
     return msal.PublicClientApplication(
         client_id=client_id,
         authority=AUTHORITY,

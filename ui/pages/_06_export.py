@@ -8,6 +8,9 @@ import streamlit as st
 
 from domain.docx_service import build_docx_report
 from domain.report_service import build_report_data, build_report_markdown
+from repositories import onedrive_repository
+from services.onedrive_auth import OneDriveNotConfiguredError
+from ui.state import get_audit, save_audit
 from ui.studio_panel import render_studio_summary
 
 PAGE_TITLE = "06 - Export du rapport"
@@ -316,6 +319,69 @@ def _render_markdown_export(context: dict[str, Any], base_name: str) -> None:
     )
 
 
+def _render_onedrive_sync() -> None:
+    st.subheader("Synchronisation OneDrive (photos & preuves)")
+    st.caption(
+        "Pousse les photos et documents associés aux preuves vers le dossier "
+        "OneDrive de l'audit (`audits/<id>/evidences/<type>/...`). "
+        "Le stockage local n'est pas modifié."
+    )
+
+    audit = get_audit()
+    preuves = list(audit.preuves) if audit and audit.preuves else []
+    syncables = [p for p in preuves if p.chemin_fichier]
+    if not preuves:
+        st.info("Aucune preuve enregistrée — rien à synchroniser.")
+        return
+
+    st.write(
+        f"**{len(syncables)}** preuve(s) avec fichier local sur **{len(preuves)}** total."
+    )
+
+    if st.button("Synchroniser les photos & preuves OneDrive", type="secondary"):
+        progress = st.progress(0.0, text="Préparation de l'upload…")
+        log_placeholder = st.empty()
+        total_count = max(len(audit.preuves), 1)
+
+        def _on_progress(index: int, total: int, preuve) -> None:
+            progress.progress(min(1.0, index / max(total, 1)), text=f"Upload {index}/{total}")
+
+        try:
+            results = onedrive_repository.upload_audit_evidences(audit, on_progress=_on_progress)
+            save_audit(audit)
+        except OneDriveNotConfiguredError as exc:
+            progress.empty()
+            st.warning(str(exc))
+            return
+        except Exception as exc:
+            progress.empty()
+            st.error(f"Authentification ou upload OneDrive impossible : {exc}")
+            return
+
+        progress.progress(1.0, text="Terminé")
+
+        uploaded = [r for r in results if r["status"] == "uploaded"]
+        skipped = [r for r in results if r["status"] == "skipped"]
+        errors = [r for r in results if r["status"] == "error"]
+
+        if uploaded:
+            st.success(f"{len(uploaded)} preuve(s) uploadée(s) sur OneDrive.")
+        if skipped:
+            st.info(f"{len(skipped)} preuve(s) ignorée(s) (fichier local absent ou non renseigné).")
+        if errors:
+            st.error(f"{len(errors)} preuve(s) en erreur — détails ci-dessous.")
+
+        with log_placeholder.expander("Détail par preuve", expanded=bool(errors)):
+            for r in results:
+                icon = {"uploaded": "✅", "skipped": "⚠️", "error": "❌"}.get(r["status"], "•")
+                line = f"{icon} `{r['preuve_id']}` — {r['status']}"
+                if r.get("onedrive_path"):
+                    line += f" → `{r['onedrive_path']}`"
+                if r.get("reason"):
+                    line += f" — {r['reason']}"
+                st.write(line)
+
+
 def _render_json_export(payload: dict[str, Any], base_name: str) -> None:
     st.subheader("Export JSON")
 
@@ -364,6 +430,8 @@ def main() -> None:
         _render_markdown_export(context, base_name)
         st.markdown("---")
         _render_json_export(payload, base_name)
+        st.markdown("---")
+        _render_onedrive_sync()
 
 
 def render() -> None:
