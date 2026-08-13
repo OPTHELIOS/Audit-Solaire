@@ -1,0 +1,12 @@
+streamlit
+pydantic
+folium
+streamlit-folium
+geopy
+msal>=1.30.0
+requests>=2.31.0
+python-docx
+Pillow
+pandas
+openpyxl
+docx2pdf

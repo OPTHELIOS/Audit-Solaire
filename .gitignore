@@ -1,0 +1,20 @@
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+.venv/
+venv/
+output/
+*.egg-info/
+.DS_Store
+
+# Fichiers contenant des secrets réels (client secret Azure copié depuis le
+# portail) ou des captures d'écran de configuration admin : jamais dans Git.
+certificats et secrets.txt
+*.pem
+*secret*.txt
+Capture d'écran*.png
+
+# Données locales d'exécution (audits/preuves écrits sur cette machine) et
+# livraison intermédiaire antérieure devenue obsolète (voir CHANGES.md).
+data/
+audit-solaire-sharepoint/
