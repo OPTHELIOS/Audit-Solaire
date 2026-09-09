@@ -34,6 +34,7 @@ distingue donc les deux situations :
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 import streamlit as st
 
@@ -83,8 +84,14 @@ def is_auth_configured() -> bool:
         if auth.get("client_id") and auth.get("server_metadata_url"):
             return True
         # Fournisseur nomme, ex. [auth.microsoft].
+        #
+        # `Mapping` et NON `dict` : st.secrets renvoie des `AttrDict`, qui
+        # implementent Mapping sans heriter de dict. Un test `isinstance(...,
+        # dict)` echoue donc sur la vraie configuration tout en passant sur
+        # un dictionnaire ordinaire — l'appli restait bloquee sur "non
+        # configure" avec des secrets pourtant complets.
         return any(
-            isinstance(value, dict)
+            isinstance(value, Mapping)
             and value.get("client_id")
             and value.get("server_metadata_url")
             for value in auth.values()
@@ -118,7 +125,8 @@ def _provider_name() -> str | None:
         if auth.get("client_id"):
             return None
         for key, value in auth.items():
-            if isinstance(value, dict) and value.get("client_id"):
+            # Mapping, pas dict : voir la note dans is_auth_configured().
+            if isinstance(value, Mapping) and value.get("client_id"):
                 return key
     except Exception:
         pass

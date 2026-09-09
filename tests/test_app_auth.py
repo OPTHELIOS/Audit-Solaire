@@ -258,7 +258,23 @@ def sans_hebergeur(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_integration_local_non_protege_affiche_lappli_et_avertit(sans_hebergeur):
+@pytest.fixture
+def sans_auth_configuree(monkeypatch):
+    """Neutralise la configuration d'authentification REELLE de la machine.
+
+    Sans ce garde-fou, ces tests changeaient de sens selon le poste : verts
+    tant que le developpeur n'avait pas de section [auth] dans son
+    secrets.toml, rouges des qu'il en configurait une. Ce qu'on veut
+    verifier ici n'est pas la detection de la configuration (couverte par
+    les tests unitaires plus haut) mais le CABLAGE : que main() appelle bien
+    require_login() et cesse de rendre l'appli quand l'acces est refuse.
+    """
+    monkeypatch.setattr(app_auth, "is_auth_configured", lambda: False)
+
+
+def test_integration_local_non_protege_affiche_lappli_et_avertit(
+    sans_hebergeur, sans_auth_configuree
+):
     at = AppTest.from_file(APP, default_timeout=120).run()
 
     assert not at.exception, at.exception
@@ -270,7 +286,9 @@ def test_integration_local_non_protege_affiche_lappli_et_avertit(sans_hebergeur)
     ), "l'appli aurait du s'afficher normalement en local"
 
 
-def test_integration_hebergeur_sans_auth_ferme_lappli(sans_hebergeur, monkeypatch):
+def test_integration_hebergeur_sans_auth_ferme_lappli(
+    sans_hebergeur, sans_auth_configuree, monkeypatch
+):
     """LE test qui compte : publiee sans authentification, l'appli doit se
     fermer. On verifie non seulement qu'une erreur s'affiche, mais surtout
     qu'AUCUN contenu applicatif n'est rendu — un message d'erreur au-dessus
@@ -283,3 +301,45 @@ def test_integration_hebergeur_sans_auth_ferme_lappli(sans_hebergeur, monkeypatc
     assert at.error, "aucune erreur affichee : l'appli serait restee ouverte"
     assert not at.title, "du contenu applicatif a ete rendu malgre le blocage"
     assert not at.sidebar.radio, "la navigation a ete rendue malgre le blocage"
+
+
+# ---------------------------------------------------------------------
+# Non-regression : les vrais objets de st.secrets ne sont pas des dict
+# ---------------------------------------------------------------------
+# Bug constate en conditions reelles : `st.secrets` renvoie des `AttrDict`,
+# qui implementent Mapping SANS heriter de dict. Le code testait
+# `isinstance(value, dict)` — vrai sur les dictionnaires ordinaires des
+# tests ci-dessus, faux sur la vraie configuration. Resultat : avec des
+# secrets pourtant complets et valides, l'appli se croyait non configuree.
+#
+# Le double de test ne se comportait pas comme l'objet reel : c'est
+# exactement ce que ces deux tests corrigent, en utilisant la classe que
+# Streamlit emploie reellement.
+
+from streamlit.runtime.secrets import AttrDict
+
+
+def test_configuration_reconnue_avec_les_vrais_objets_streamlit():
+    with _with_secrets({"auth": AttrDict(AUTH_COMPLETE["auth"])}):
+        assert app_auth.is_auth_configured() is True
+
+
+def test_provider_name_avec_les_vrais_objets_streamlit():
+    with _with_secrets({"auth": AttrDict(AUTH_COMPLETE["auth"])}):
+        assert app_auth._provider_name() == "microsoft"
+
+
+def test_integration_page_de_connexion_remplace_lappli(sans_hebergeur, monkeypatch):
+    """Authentification configuree mais utilisateur non connecte : la page de
+    connexion doit REMPLACER l'appli, pas s'afficher au-dessus. Un bouton de
+    connexion surmontant une appli deja rendue ne protegerait rien."""
+    monkeypatch.setattr(app_auth, "is_auth_configured", lambda: True)
+    monkeypatch.setattr(app_auth, "is_logged_in", lambda: False)
+
+    at = AppTest.from_file(APP, default_timeout=120).run()
+
+    assert not at.exception, at.exception
+    assert any(
+        "Se connecter" in b.label for b in at.button
+    ), "le bouton de connexion est absent"
+    assert not at.sidebar.radio, "la navigation a ete rendue avant la connexion"
