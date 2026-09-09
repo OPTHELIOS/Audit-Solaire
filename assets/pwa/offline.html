@@ -1,0 +1,84 @@
+<!doctype html>
+<!--
+  Ecran affiche par le service worker (assets/pwa/sw.js) quand l'appli est
+  lancee ou rechargee sans reseau. Remplace la page d'erreur brute du
+  navigateur, qui laissait croire a un plantage de l'appli.
+
+  Autonome par construction : ni CSS ni police ni image externe, puisque
+  precisement rien ne peut etre telecharge au moment ou cette page
+  s'affiche. Le logo est un trace SVG inline pour la meme raison.
+-->
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Hors reseau — Audit OPT'HELIOS</title>
+    <style>
+      :root {
+        --marine: #1c1e3d;
+        --or: #f9b13a;
+        --creme: #f4f1e4;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        padding: 2rem max(1.5rem, env(safe-area-inset-left)) calc(2rem + env(safe-area-inset-bottom));
+        background: var(--marine);
+        color: var(--creme);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        text-align: center;
+        -webkit-font-smoothing: antialiased;
+      }
+      svg { width: 72px; height: 72px; }
+      h1 { margin: 0; font-size: 1.4rem; font-weight: 600; letter-spacing: -0.01em; }
+      p { margin: 0; max-width: 30rem; line-height: 1.6; opacity: 0.85; font-size: 1rem; }
+      button {
+        margin-top: 0.5rem;
+        padding: 0.9rem 2rem;
+        border: 0;
+        border-radius: 10px;
+        background: var(--or);
+        color: var(--marine);
+        font-size: 1rem;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        /* Cible tactile confortable au doigt, gants de chantier compris. */
+        min-height: 48px;
+      }
+      button:active { opacity: 0.75; }
+      .note { font-size: 0.85rem; opacity: 0.55; max-width: 26rem; }
+    </style>
+  </head>
+  <body>
+    <svg viewBox="0 0 24 24" fill="none" stroke="#f9b13a" stroke-width="1.6"
+         stroke-linecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+    </svg>
+
+    <h1>Pas de reseau</h1>
+    <p>
+      L'application d'audit a besoin d'une connexion pour fonctionner.
+      Vos saisies deja enregistrees sont conservees : rien n'est perdu.
+    </p>
+    <button type="button" onclick="location.reload()">Reessayer</button>
+    <p class="note">
+      La page se rechargera d'elle-meme des que la connexion reviendra.
+    </p>
+
+    <script>
+      // Rechargement automatique au retour du reseau : evite a l'auditeur
+      // de surveiller l'ecran en sortant du local technique.
+      window.addEventListener("online", function () {
+        location.reload();
+      });
+    </script>
+  </body>
+</html>

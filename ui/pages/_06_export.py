@@ -238,7 +238,7 @@ def _render_docx_export(
             value=profile_defaults["include_evidences"],
         )
 
-        submitted = st.form_submit_button("Générer le DOCX", use_container_width=True)
+        submitted = st.form_submit_button("Générer le DOCX", width="stretch")
 
     if not submitted:
         return
@@ -314,7 +314,7 @@ def _render_pdf_export() -> None:
         st.info("Génère d'abord un rapport DOCX ci-dessus avant de pouvoir le convertir en PDF.")
         return
 
-    if st.button("Convertir le dernier DOCX généré en PDF", use_container_width=True):
+    if st.button("Convertir le dernier DOCX généré en PDF", width="stretch"):
         try:
             from services.pdf_service import convert_docx_to_pdf
 
@@ -353,7 +353,7 @@ def _render_checklist_export(base_name: str) -> None:
         st.info("Aucun audit actif en session.")
         return
 
-    if st.button("Générer la checklist terrain (DOCX)", use_container_width=True):
+    if st.button("Générer la checklist terrain (DOCX)", width="stretch"):
         try:
             with st.spinner("Génération de la checklist en cours...", show_time=True):
                 output_dir = Path("output")

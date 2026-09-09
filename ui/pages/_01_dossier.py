@@ -384,12 +384,12 @@ def render() -> None:
     col_geo1, col_geo2 = st.columns(2)
 
     with col_geo1:
-        if st.button("Localiser à partir de l'adresse", use_container_width=True):
+        if st.button("Localiser à partir de l'adresse", width="stretch"):
             if _geocode_from_address():
                 st.rerun()
 
     with col_geo2:
-        if st.button("Compléter depuis les coordonnées GPS", use_container_width=True):
+        if st.button("Compléter depuis les coordonnées GPS", width="stretch"):
             if _reverse_from_coordinates():
                 st.rerun()
 

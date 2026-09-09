@@ -30,7 +30,10 @@ from pathlib import Path
 
 MARKER = "<!-- opthelios-pwa-patch -->"
 
-HEAD_INJECTION = f"""{MARKER}
+# NB : concatenation et non f-string — le script d'enregistrement du service
+# worker ci-dessous contient des accolades, qu'une f-string interpreterait
+# comme des champs de substitution.
+HEAD_INJECTION = MARKER + """
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
@@ -38,6 +41,24 @@ HEAD_INJECTION = f"""{MARKER}
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Audit OPT'HELIOS">
+<!-- Equivalent standard de `apple-mobile-web-app-capable`, desormais la
+     forme recommandee et celle que lit Chrome/Android. Les deux sont
+     conservees : iOS ne reconnait que la variante prefixee `apple-`. -->
+<meta name="mobile-web-app-capable" content="yes">
+<script>
+  // Enregistrement du service worker (voir assets/pwa/sw.js) : condition
+  // pour que Chrome/Android propose "Installer l'application", et pour
+  // afficher un ecran OPT'HELIOS plutot que l'erreur brute du navigateur
+  // en cas de coupure reseau. Un echec ici est sans consequence sur le
+  // fonctionnement de l'appli : on se contente de le journaliser.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js").catch(function (err) {
+        console.warn("[opthelios] service worker non enregistre :", err);
+      });
+    });
+  }
+</script>
 """
 
 ASSET_FILES = [
@@ -48,6 +69,16 @@ ASSET_FILES = [
     "favicon-32.png",
     "favicon-16.png",
     "manifest.json",
+]
+
+# Fichiers du mode "appli" servis depuis assets/pwa/. Separes des icones
+# ci-dessus parce qu'ils portent du comportement, pas de la presentation.
+# `sw.js` DOIT etre servi a la racine du site : la portee d'un service
+# worker est limitee au dossier d'ou il est servi, et il doit donc couvrir
+# "/" pour controler toute l'appli.
+PWA_FILES = [
+    "sw.js",
+    "offline.html",
 ]
 
 
@@ -95,18 +126,28 @@ def main() -> int:
         print("[patch_streamlit_pwa] balise <head> introuvable dans index.html, patch ignore.")
         return 0
 
-    # Copie des icones/manifest a la racine du dossier static de Streamlit
-    # (servi tel quel a la racine de l'appli, ex. /favicon.ico), pour que
-    # les chemins absolus references dans HEAD_INJECTION fonctionnent.
-    for filename in ASSET_FILES:
-        source = source_assets / filename
-        if not source.is_file():
-            print(f"[patch_streamlit_pwa] {source} manquant, ignore.")
-            continue
-        try:
-            shutil.copy2(source, static_dir / filename)
-        except Exception as exc:
-            print(f"[patch_streamlit_pwa] copie de {filename} impossible ({exc}), ignore.")
+    # Copie des icones/manifest et des fichiers du mode "appli" a la racine
+    # du dossier static de Streamlit (servi tel quel a la racine de l'appli,
+    # ex. /favicon.ico, /sw.js), pour que les chemins absolus references
+    # dans HEAD_INJECTION fonctionnent.
+    #
+    # assets/pwa/ est traite comme optionnel au meme titre que le reste :
+    # absent, l'appli garde ses icones et son plein ecran, elle perd
+    # seulement l'installabilite Android et l'ecran de repli hors reseau.
+    sources = [
+        (source_assets, ASSET_FILES),
+        (repo_root / "assets" / "pwa", PWA_FILES),
+    ]
+    for source_dir, filenames in sources:
+        for filename in filenames:
+            source = source_dir / filename
+            if not source.is_file():
+                print(f"[patch_streamlit_pwa] {source} manquant, ignore.")
+                continue
+            try:
+                shutil.copy2(source, static_dir / filename)
+            except Exception as exc:
+                print(f"[patch_streamlit_pwa] copie de {filename} impossible ({exc}), ignore.")
 
     patched_html = html.replace("<head>", f"<head>\n{HEAD_INJECTION}", 1)
 

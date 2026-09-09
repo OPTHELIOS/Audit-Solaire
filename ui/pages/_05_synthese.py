@@ -167,14 +167,14 @@ def _render_expert_conclusion(payload: dict[str, Any]) -> None:
 
     c1, c2 = st.columns(2)
 
-    if c1.button("Enregistrer la conclusion", use_container_width=True):
+    if c1.button("Enregistrer la conclusion", width="stretch"):
         st.session_state[SESSION_CONCLUSION_KEY] = conclusion
         audit.synthese.conclusion_generale = conclusion or None
         audit = touch_audit(audit)
         save_audit(audit)
         st.success("Conclusion enregistrée dans le dossier d'audit.")
 
-    if c2.button("Réinitialiser depuis le statut global", use_container_width=True):
+    if c2.button("Réinitialiser depuis le statut global", width="stretch"):
         fallback = payload.get("global_assessment", {}).get("commentaire_global", "")
         st.session_state[SESSION_CONCLUSION_KEY] = fallback
         audit.synthese.conclusion_generale = fallback or None

@@ -154,7 +154,7 @@ def _render_add_form(audit: Any, control_options: dict[str, dict[str, str]]) -> 
         submitted = st.form_submit_button(
             "Enregistrer la/les preuve(s)",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
         if not submitted:
@@ -255,7 +255,7 @@ def _render_image_preview(file_path: str, caption: str) -> None:
     try:
         path = Path(file_path)
         if path.exists():
-            st.image(str(path), caption=caption, use_container_width=True)
+            st.image(str(path), caption=caption, width="stretch")
         else:
             st.caption("Aperçu image indisponible : fichier non accessible localement.")
     except Exception:

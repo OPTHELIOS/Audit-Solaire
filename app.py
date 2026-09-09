@@ -276,7 +276,7 @@ def main() -> None:
     init_session_state()
 
     if logo is not None:
-        st.sidebar.image(LOGO_PATH, use_container_width=True)
+        st.sidebar.image(LOGO_PATH, width="stretch")
 
     st.sidebar.title("Navigation")
 

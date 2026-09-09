@@ -1,4 +1,13 @@
-streamlit
+# ATTENTION : version EPINGLEE volontairement. `scripts/patch_streamlit_pwa.py`
+# (mode "appli iPhone/tablette" : icone d'ecran d'accueil, plein ecran, manifest
+# PWA) modifie le fichier `index.html` compile a l'interieur du paquet streamlit
+# lui-meme. Cette structure interne n'est couverte par aucune garantie de
+# compatibilite : une montee de version peut la changer. Le patch etant
+# defensif, il n'echouerait pas -- il ne ferait simplement PLUS RIEN, en
+# silence, et l'appli perdrait son apparence native sans le moindre message
+# d'erreur. Avant de relever cette version, rejouer le build Docker et verifier
+# que le log affiche bien "[patch_streamlit_pwa] OK".
+streamlit==1.62.0
 pydantic
 folium
 streamlit-folium

@@ -63,7 +63,7 @@ def _render_add_releve_form(audit: Any) -> None:
             placeholder="Ex. mesuré au manomètre chaufferie, conditions ensoleillées...",
         )
 
-        submitted = st.form_submit_button("Ajouter le relevé", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Ajouter le relevé", type="primary", width="stretch")
 
     if not submitted:
         return

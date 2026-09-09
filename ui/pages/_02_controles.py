@@ -486,7 +486,7 @@ def _render_section(
             submitted = st.form_submit_button(
                 "Enregistrer la section",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
 
             if submitted:
