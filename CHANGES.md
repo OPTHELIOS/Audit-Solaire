@@ -246,6 +246,507 @@ je t'aide à identifier le bon bouton.
       (rapprochés par libellé identique) avec l'écart affiché.
     - Lecture seule : la comparaison ne modifie ni ne sauvegarde l'audit
       antérieur chargé, elle sert uniquement à l'affichage.
+23. **Bug réel corrigé : impossible de recharger un audit avec un point
+    classé "Information".** Sur la page "Contrôles techniques", le
+    sélecteur "Criticité retenue" propose 4 niveaux (`domain/control_catalog.py`
+    : critique, majeure, mineure, information), mais le modèle de
+    sauvegarde (`domain/models.py::Criticite`, utilisé par
+    `ConstatControle.criticite`/`criticite_finale`) n'en acceptait que 3
+    (il manquait "information"). Résultat : choisir "Information" pour un
+    point s'enregistrait sans erreur en session (Python ne revalide pas une
+    simple assignation de champ), mais l'audit devenait ensuite impossible
+    à recharger — `Audit.model_validate(...)` rejetait la valeur
+    "information" comme invalide, avec une erreur du type *"Input should
+    be 'mineure', 'majeure' or 'critique'"*. Corrigé en ajoutant
+    `information` à `domain/models.py::Criticite`, pour que les deux
+    énumérations restent alignées. Les audits déjà sauvegardés avec un
+    point "Information" (dont le JSON contient déjà la bonne valeur)
+    redeviennent chargeables sans aucune manipulation supplémentaire.
+    `domain/report_service.py` (tri des constats par criticité, libellés du
+    rapport) a aussi été mis à jour pour traiter explicitement ce 4e
+    niveau. Test de non-régression ajouté :
+    `tests/test_models.py::test_criticite_information_survives_json_roundtrip`.
+24. **Bug réel corrigé : génération du DOCX plantait avec `Erreur lors de la
+    génération du DOCX : 'impact'`.** `domain/docx_service.py::_add_action_plan`
+    lit `item["impact"]` pour remplir la colonne "Impact" du tableau du plan
+    d'actions, mais `domain/control_service.py::build_action_plan` (et
+    `extract_findings`, dont il dépend) ne produisaient jamais cette clé —
+    le DOCX plantait donc systématiquement dès qu'un audit contenait au
+    moins un constat non conforme/non présent/non vérifiable. Corrigé en
+    reprenant l'impact par défaut du catalogue de contrôles
+    (`ControleCatalogueItem.impact_defaut`) dans `extract_findings`, propagé
+    dans `build_action_plan`, avec en plus un `.get("impact", "")`
+    défensif côté `docx_service.py`. Test de non-régression ajouté :
+    `tests/test_control_service.py::test_extract_findings_and_action_plan_include_impact_key`.
+25. **Mise en forme du rapport DOCX alignée sur la charte graphique
+    OPT'HELIOS.** Le rapport d'audit (et la checklist terrain) utilisaient
+    le thème par défaut de Word (Calibri gris/bleu clair générique), sans
+    logo ni aucune des couleurs de marque utilisées par ailleurs sur les
+    notes techniques OPT'HELIOS (bleu marine / or / bleu ciel, filets
+    d'en-tête/pied de page, bandeaux de titre, encarts) — signalé comme
+    "pas très sexy" et sans logo par l'utilisateur. Deux causes : (1)
+    `domain/docx_service.py` construisait le document avec les styles Word
+    par défaut (pas de couleur, pas de bandeau, tableaux à liseré gris) ;
+    (2) `assets/opthelios_logo.png` (référencé par `docx_service.py` ET par
+    la barre latérale de `app.py`) n'existait tout simplement pas dans le
+    dépôt — ajouté ici (logo officiel, repris tel quel des notes
+    techniques existantes).
+
+    Ajout de `domain/opthelios_style.py`, qui reprend les codes exacts de
+    la charte (bleu marine `#1C1E3D`, or `#F9B13A`, bleu ciel `#8FC4E4`,
+    crème doré `#FAEAB6`, jaune pâle `#FBED94`, police Calibri, format A4,
+    marges 1000 twips) et expose des fonctions réutilisables avec
+    `python-docx` : bandeaux de titre H1/H2/H3, en-tête/pied de page avec
+    filet or et pagination "Page X / Y", tableaux à en-tête marine/texte
+    blanc et lignes alternées crème, encarts ("callout") pour les messages
+    clés et l'appréciation globale, page de garde avec logo. `CORRECTIF`
+    notable rencontré en le construisant : le style Word intégré
+    "En-tête"/"Pied de page" embarque son propre taquet de tabulation
+    centré, qui prenait le pas sur le taquet aligné à droite ajouté
+    directement au paragraphe (le texte de droite atterrissait au milieu
+    de la page au lieu d'être aligné à droite) — corrigé en repassant ces
+    paragraphes au style "Normal" avant d'y ajouter le taquet voulu.
+
+    `domain/docx_service.py` a été entièrement restylé avec ce module
+    (page de garde, en-tête/pied de page courants, titres, tableaux,
+    encarts), sans changer sa signature publique (`build_docx_report`,
+    `build_checklist_docx`) : aucun autre fichier appelant n'a besoin
+    d'être modifié. Vérifié visuellement (conversion LibreOffice → PDF →
+    capture des pages clés) sur un rapport de démonstration couvrant les 4
+    niveaux de criticité. Tests ajoutés :
+    `tests/test_docx_service.py` (génération sans erreur du rapport et de
+    la checklist, présence du logo, couleurs de la charte).
+26. **Code couleur "feu tricolore" sur les verdicts et criticités du
+    rapport.** Demande explicite : le rapport DOCX est transmis au maître
+    d'ouvrage (non technicien), qui doit repérer d'un coup d'œil les points
+    qui exigent une action de ceux qui sont acquis, sans lire chaque
+    phrase de constat. Ajout dans `domain/opthelios_style.py` de couleurs
+    sémantiques ajoutées EN COMPLÉMENT de la charte (pas de recouvrement
+    avec le bleu marine/or/bleu ciel, réservés à l'identité visuelle) :
+    rouge `#C0392B` (critique / non conforme), orange `#E67E22` (majeure /
+    non présent / non vérifiable), jaune `#F2C94C` (mineure), bleu
+    `#5DADE2` (information — signalé mais pas noté comme un écart), vert
+    `#27AE60` (conforme), gris `#95A5A6` (sans objet / valeur non reconnue,
+    repli neutre plutôt que plantage). Nouvelle fonction
+    `add_status_badge()` : pastille "●" colorée + libellé en toutes
+    lettres (au lieu de la valeur technique brute type "non_conforme"),
+    appliquée dans `domain/docx_service.py::_add_findings` sur les lignes
+    "Verdict :" et "Criticité :" de chaque constat détaillé (section 4 du
+    rapport). Périmètre volontairement limité à cette section pour cette
+    itération (l'utilisateur a aussi proposé de colorer la colonne
+    Priorité du plan d'actions, le tableau récap par section et un
+    "tableau de bord" en page d'appréciation globale — pas retenu pour
+    l'instant, à reprendre si besoin). Vérifié visuellement. Tests
+    ajoutés : `tests/test_docx_service.py::test_status_badge_covers_every_verdict_and_criticite_value`
+    (couverture de toutes les valeurs réellement produites par le modèle,
+    dont "information") et `test_add_status_badge_does_not_crash_on_unknown_value`.
+27. **Lenteur au démarrage de l'appli, signalée par l'utilisateur.** Deux
+    causes réelles trouvées par lecture de code (pas de supposition) :
+    - `app.py` importait les 8 modules de pages en tête de fichier,
+      systématiquement, à chaque démarrage du serveur Streamlit — y
+      compris les pages jamais visitées pendant la session. Or certaines
+      importent, à leur propre niveau module, des bibliothèques lourdes à
+      charger : `folium` + `geopy` + `streamlit_folium` (page "Dossier"),
+      `pandas` (page "Synthèse"), `python-docx` (page "Export"),
+      `msal`/`requests` (page "Infos audit", via
+      `repositories/sharepoint_repository.py` et
+      `services/sharepoint_auth.py`). Le tout premier lancement payait donc
+      le coût d'import de TOUTES ces bibliothèques d'un coup, même pour un
+      auditeur qui n'utilise que 2-3 pages dans sa session. Corrigé en
+      rendant chaque page — et les imports SharePoint/MSAL de
+      `render_infos_audit()` — paresseuse (import à l'intérieur du bloc qui
+      l'utilise plutôt qu'en tête de fichier) : Python met de toute façon
+      en cache un module déjà importé (`sys.modules`), donc naviguer
+      plusieurs fois vers la même page ne recharge rien de plus qu'avant —
+      seul le tout premier affichage de CETTE page précise a désormais un
+      coût d'import, au lieu que les 8 pages le paient toutes au démarrage.
+    - `services/sharepoint_auth.py::_get_confidential_app()` recréait un
+      nouveau `msal.ConfidentialClientApplication` à CHAQUE appel (donc à
+      chaque sauvegarde, chaque affichage de "Infos audit"...). C'est cet
+      objet qui porte le cache de jetons interne à MSAL : en le recréant
+      systématiquement, le cache était toujours vide et
+      `acquire_token_for_client` refaisait un aller-retour réseau complet
+      vers Azure AD à chaque fois, alors qu'un jeton "app-only" reste
+      valide ~60-90 min. Corrigé avec `@st.cache_resource` : une seule
+      instance vit par processus serveur (partagée entre sessions, ce qui
+      est correct ici — le jeton n'est pas propre à un auditeur), donc le
+      cache MSAL sert enfin à quelque chose et la plupart des appels
+      renvoient un jeton déjà en mémoire, sans latence réseau — sensible
+      en particulier sur une connexion mobile en 4G depuis le terrain.
+
+    Aucun changement fonctionnel : mêmes pages, mêmes boutons, même
+    comportement, juste un chargement différé. Vérifié par compilation de
+    l'ensemble du dépôt (`python -m compileall`) après coup.
+28. **Échec de sauvegarde cloud rendu visible (retour terrain : mauvaise
+    réception réseau en chaufferie sur iPhone).** Jusqu'ici,
+    `services/autosave_service.py::try_autosave_to_cloud` échouait en
+    silence total en cas de réseau indisponible : un toast "☁️ Sauvegarde
+    automatique effectuée" s'affichait en cas de succès, mais RIEN n'était
+    montré en cas d'échec — l'auditeur n'avait donc aucun moyen de savoir,
+    en zone mal captée, que ses saisies ne partaient plus vers le cloud
+    (risque de croire à tort que tout est sauvegardé). Corrigé :
+    - `try_autosave_to_cloud` renvoie désormais un tri-état : `True`
+      (synchronisé), `False` (cloud configuré mais tentative échouée —
+      réseau, permissions...), `None` (cloud non configuré, rien à
+      tenter). L'appelant (`ui/state.py::_maybe_autosave`) mémorise cet
+      état dans `st.session_state` (`_cloud_sync_ok`,
+      `_cloud_sync_last_ok_ts`) et n'affiche un toast QUE sur un
+      changement d'état (réussite → échec ou l'inverse), jamais à chaque
+      tentative — sinon, avec le throttle de 20s existant, un auditeur en
+      zone blanche recevrait un toast d'échec toutes les 20 secondes
+      pendant toute sa visite.
+    - Nouvel indicateur permanent dans la barre latérale, visible sur
+      TOUTES les pages (`app.py::_render_cloud_sync_status_sidebar`) :
+      "☁️ Sauvegarde cloud à jour" en fonctionnement normal, ou un
+      avertissement explicite ("⚠️ Sauvegarde cloud en attente (réseau ?)
+      — dernière réussie il y a X min. Vos saisies restent conservées dans
+      cette session ; retentez depuis « Infos audit »...") en cas d'échec.
+      L'indicateur ne s'affiche que si une tentative a déjà eu lieu dans la
+      session (clé absente sinon) : aucun coût supplémentaire au
+      démarrage, cohérent avec le correctif précédent sur les imports
+      paresseux.
+    - Rappel important, déjà vrai avant ce correctif mais qui reste la
+      vraie garantie anti-perte de données : l'écriture locale (JSON de
+      l'audit en session, fichiers de preuves sur disque) a TOUJOURS lieu
+      en premier et ne dépend jamais du cloud (voir
+      `services/evidence_service.py::_try_cloud_backup`, conçu comme une
+      couche de sécurité EN PLUS, pas comme le seul filet). Ce correctif ne
+      change donc rien à la fiabilité de la sauvegarde elle-même : il la
+      rend seulement visible quand elle échoue, pour que l'auditeur sache
+      qu'il doit refaire un "Forcer la sauvegarde maintenant" une fois une
+      meilleure connexion retrouvée (ou, à défaut de réseau du tout sur le
+      site, utiliser la checklist terrain imprimable — voir point 20 —
+      puis ressaisir une fois de retour en zone couverte).
+
+    Tests ajoutés : `tests/test_autosave_visibility.py` (tri-état,
+    non-régression du throttle, timestamp de dernière réussite préservé en
+    cas d'échec, indicateur de barre latérale qui ne plante jamais).
+
+## Déploiement cloud (accès depuis iPhone / tablette / PC)
+
+L'appli tournait jusqu'ici uniquement en local (`streamlit run app.py`),
+donc utilisable seulement sur le PC qui l'exécute. Pour y accéder depuis
+n'importe quel appareil via une URL, déploiement sur **Streamlit Community
+Cloud** (gratuit) :
+
+Deux fichiers ont été ajoutés pour rendre ça possible :
+- `packages.txt` : liste `libreoffice`, installé automatiquement par
+  Streamlit Cloud (dépendance système, pas Python) pour permettre l'export
+  PDF sur ce serveur Linux, où Microsoft Word n'existe pas.
+- `services/pdf_service.py` : la conversion DOCX → PDF essaie d'abord Word
+  (via `docx2pdf`, en local Windows/Mac), puis LibreOffice en ligne de
+  commande (`soffice --headless`) si Word n'est pas disponible — donc le
+  même bouton "Convertir en PDF" fonctionne aussi bien en local que
+  déployé. `docx2pdf` a été rendu conditionnel dans `requirements.txt`
+  (marqueur `sys_platform`) pour ne pas tenter de l'installer sur Linux.
+
+### Étapes de déploiement (à faire par toi, ça nécessite ton compte GitHub)
+
+1. Va sur [share.streamlit.io](https://share.streamlit.io), connecte-toi
+   avec ton compte GitHub (celui utilisé pour `OPTHELIOS/Audit-Solaire`),
+   autorise l'accès si demandé.
+2. **New app** (ou **Create app**) → choisis le dépôt
+   `OPTHELIOS/Audit-Solaire`, la branche `main` (une fois ta Pull Request
+   fusionnée), fichier principal `app.py`.
+3. Avant ou juste après le premier déploiement : **Settings → Secrets**,
+   colle le même contenu que ton `.streamlit/secrets.toml` local :
+   ```toml
+   [microsoft_app]
+   tenant_id = "..."
+   client_id = "..."
+   client_secret = "..."
+   site_id = "..."
+   root_folder = "AuditsOPTHELIOS"
+   ```
+4. Lance le déploiement (premier build ~2-5 min, le temps d'installer les
+   dépendances Python et LibreOffice).
+5. **Important (données clients)** : passe l'appli en **privée** —
+   **Settings → Sharing** → restreins l'accès à des emails précis (le tien
+   et ceux des collègues concernés). Le plan gratuit autorise une appli
+   privée.
+6. Une fois en ligne, tu obtiens une URL du type
+   `https://xxxxx.streamlit.app`.
+
+### Avoir une icône sur l'écran d'accueil (iPhone/iPad/Android/PC)
+
+- **iPhone/iPad (Safari)** : ouvre l'URL → bouton Partager → **Sur l'écran
+  d'accueil**. Ça crée une icône qui s'ouvre en plein écran, sans barre
+  d'adresse.
+- **Android (Chrome)** : menu ⋮ → **Ajouter à l'écran d'accueil** /
+  **Installer l'application**.
+- **PC (Chrome/Edge)** : icône d'installation dans la barre d'adresse, ou
+  menu → **Installer [nom de l'appli]**.
+
+### Limites du plan gratuit à connaître
+
+RAM limitée (1 Go), l'appli se met en veille après 12h d'inactivité (le
+premier accès après veille prend ~30 secondes le temps de redémarrer), pas
+de nom de domaine personnalisé. Si ça devient limitant (usage intensif,
+image plus pro), un hébergement dédié (VPS, Azure App Service...) reste une
+évolution possible plus tard.
+
+### Logo manquant
+
+**Résolu (point 25 plus haut)** : `assets/opthelios_logo.png` a été ajouté
+(logo officiel OPT'HELIOS), plus tout un jeu d'icônes carrées dérivées dans
+`assets/icons/` (favicon, icône iOS/Android...). Cette note reste ici pour
+mémoire mais ne s'applique plus.
+
+## Palier 1 — passage en hébergement pro avec domaine personnalisé
+
+Demande explicite (sept. 2026) : passer d'un lien `*.streamlit.app` à une
+"vraie appli" avec une adresse et une présentation pro. Point important
+établi avant de choisir une direction : **Streamlit Community Cloud (la
+section "Déploiement cloud" ci-dessus) ne supporte pas les domaines
+personnalisés** — seulement un sous-domaine `*.streamlit.app` — et n'offre
+aucun moyen d'injecter une icône "Ajouter à l'écran d'accueil" correcte
+côté iOS. Un vrai domaine (ex. `audit.opthelios.fr`) et une icône
+d'installation soignée nécessitent donc un hébergement via **conteneur
+Docker**, sur une plateforme qui accepte un domaine personnalisé (Azure
+Container Apps, Render, Fly.io, Railway...).
+
+### Ce qui a été préparé côté code (déjà fait, applicable quel que soit l'hébergeur choisi)
+
+29. **Thème visuel natif Streamlit** (`.streamlit/config.toml`, nouveau) :
+    l'appli utilisait jusqu'ici le thème bleu générique par défaut de
+    Streamlit — rien ne rappelait la charte OPT'HELIOS. Le thème reprend
+    désormais les mêmes couleurs que les documents (or `#F9B13A` en couleur
+    d'accent/boutons, bleu marine `#1C1E3D` en couleur de texte, fond
+    crème très clair `#F4F1E4` pour la barre latérale). Aucune ligne de
+    code Python à changer : Streamlit lit ce fichier au démarrage.
+30. **Favicon propre** (`app.py`) : l'onglet du navigateur affichait le
+    logo rectangulaire complet (700×363 px avec marge blanche), illisible
+    à la taille d'un favicon (16-32 px). Utilise désormais
+    `assets/icons/favicon-32.png`, un recadrage carré centré sur le seul
+    disque solaire (généré depuis le logo officiel, marge blanche
+    supprimée par flood-fill pour un raccord invisible avec le fond
+    marine). Le logo complet reste utilisé tel quel dans la barre
+    latérale, où sa largeur passe bien.
+31. **Icônes "Ajouter à l'écran d'accueil" iOS/Android + manifest PWA**
+    (`assets/icons/` : `apple-touch-icon.png` 180×180 sans canal alpha —
+    obligatoire côté iOS, `icon-192.png`, `icon-512.png`, `manifest.json`).
+    Streamlit ne propose aucune option pour injecter des balises dans le
+    `<head>` de la page (les injections via `st.markdown`/composants sont
+    isolées dans un iframe, sans accès au head du document parent) : la
+    seule méthode qui fonctionne réellement consiste à patcher directement
+    le `index.html` compilé, livré à l'intérieur du paquet `streamlit`
+    installé. C'est le rôle de `scripts/patch_streamlit_pwa.py`, exécuté
+    au moment du build Docker (voir `Dockerfile`) — jamais en local, jamais
+    sur Streamlit Community Cloud. Le script est défensif de bout en bout
+    (jamais d'exception, jamais d'échec de build : si la structure interne
+    de Streamlit a changé, il log un avertissement et ne fait rien plutôt
+    que de produire une image cassée) et idempotent (relancer le build ne
+    duplique pas l'injection). Logique testée en sandbox avec un
+    `index.html` factice (injection, idempotence, absence totale de
+    crash si `streamlit` ou son dossier `static/` sont introuvables).
+32. **`Dockerfile` + `.dockerignore`** (nouveaux, racine du dépôt) : image
+    de production (`python:3.12-slim` + LibreOffice + dépendances Python +
+    patch PWA ci-dessus), avec un `HEALTHCHECK` pour que l'hébergeur sache
+    détecter un conteneur bloqué. Le `.dockerignore` exclut explicitement
+    `.streamlit/secrets.toml` et tous les fichiers de secrets de l'image —
+    **les secrets `microsoft_app` doivent être injectés au runtime via les
+    variables d'environnement/secrets de l'hébergeur choisi, jamais copiés
+    dans l'image**, qui peut finir dans un registre partagé.
+33. **`docker-entrypoint.sh`** (nouveau) + `Dockerfile` mis à jour
+    (`ENTRYPOINT ["./docker-entrypoint.sh"]`, `ENV PORT=8501` en repli) :
+    hébergeur choisi (voir ci-dessous) **Render.com**. Sur Render, un
+    "Secret File" uploadé dans le dashboard d'un service Docker est monté
+    au runtime à un chemin **fixe** : `/etc/secrets/<nom-du-fichier>`
+    (impossible de choisir cet emplacement, contrairement aux services non
+    Docker) — alors que l'appli lit ses secrets à
+    `.streamlit/secrets.toml`. Le script fait le pont entre les deux : au
+    démarrage du conteneur, si `/etc/secrets/secrets.toml` existe et que
+    `.streamlit/secrets.toml` n'existe pas encore, il copie le premier vers
+    le second, puis lance `streamlit run`. Aucune modification du code
+    Python n'est nécessaire : `services/sharepoint_auth.py` continue de
+    lire `st.secrets["microsoft_app"]` exactement comme en local. Le
+    script lit aussi `$PORT` (fourni par Render, avec un repli sur `8501`
+    pour un `docker run` local sans cette variable). Testé en sandbox
+    (chemins substitués) : copie correcte au premier démarrage, et pas
+    d'écrasement d'un `secrets.toml` déjà présent au démarrage suivant.
+
+### Hébergeur choisi : Render.com
+
+Étapes pour mettre l'appli en ligne avec un domaine personnalisé :
+
+1. Créer un compte sur [render.com](https://render.com) (le plan Hobby est
+   gratuit, seul le service web lui-même est payant — voir l'offre à
+   l'étape 4).
+2. **New → Web Service**, puis connecter le dépôt GitHub du projet (le
+   pousser sur GitHub au préalable si ce n'est pas déjà fait — rappel :
+   les opérations git restent à faire depuis ton poste, voir plus bas).
+3. Render détecte automatiquement le `Dockerfile` à la racine du dépôt et
+   propose de builder l'image telle quelle — rien à configurer côté build.
+4. Choisir l'offre **Starter (7 $/mois, toujours actif)** plutôt que
+   l'offre gratuite : celle-ci met le service en veille après 15 minutes
+   d'inactivité (retour en ligne après ~30 secondes au prochain accès),
+   ce qui reproduit exactement le défaut de lenteur de Streamlit Community
+   Cloud qu'on cherche justement à corriger.
+5. Onglet **Environment → Secret Files** : ajouter un fichier nommé
+   exactement `secrets.toml` (le nom compte : `docker-entrypoint.sh` le
+   cherche à `/etc/secrets/secrets.toml`), avec le même contenu que le
+   `.streamlit/secrets.toml` local (section `[microsoft_app]` :
+   `tenant_id`, `client_id`, `client_secret`, `site_id`). Ne jamais coller
+   ces valeurs dans le champ "Environment Variables" classique du même
+   onglet — le fichier Secret File est fait pour ça, contrairement aux
+   variables d'environnement il n'apparaît pas en clair dans les logs de
+   build.
+6. Déployer. Premier build plus long (installation LibreOffice + dépendances
+   Python) — les déploiements suivants sont plus rapides (cache Docker).
+   Vérifier que le service répond sur son adresse `<nom-du-service>.onrender.com`.
+7. **Settings → Custom Domains** → ajouter le sous-domaine choisi (ex.
+   `audit.opthelios.fr`) → Render indique la valeur CNAME exacte à créer
+   (généralement `<nom-du-service>.onrender.com`). Aller ensuite chez le
+   registrar où `opthelios.fr` est géré (OVH, Gandi ou autre — à
+   identifier côté toi) et créer cet enregistrement CNAME pour le
+   sous-domaine `audit`. La propagation DNS peut prendre de quelques
+   minutes à quelques heures ; Render émet ensuite automatiquement le
+   certificat HTTPS une fois le CNAME détecté.
+
+**Accès protégé (optionnel, mentionné en passant précédemment) :** un
+identifiant/mot de passe simple pour l'appli elle-même (distinct de
+l'authentification `microsoft_app`, qui ne protège que l'accès à
+SharePoint) reste possible à ajouter — via `streamlit-authenticator` ou,
+plus robuste, une connexion Microsoft Entra ID puisque le tenant existe
+déjà. Pas fait pour l'instant, à la demande.
+
+## Axes d'analyse réglementaire SOCOL / SOLO2018 (sept. 2026)
+
+Demande explicite : compléter l'audit avec des axes d'analyse réglementaire
+supplémentaires, en s'appuyant sur l'outil THMès (INES), sur les notions à
+vérifier au sens de la charte SOCOL (solaire thermique collectif — notes
+techniques, notes de calcul, schémas de principe nommés) et sur les données
+de dimensionnement issues d'outils comme SOLO2018. Comparaison avec THMès
+faite au préalable (voir échange du même jour) : THMès est un outil de
+**réception/mise en service** d'installations neuves (équivalent numérique
+du livret SOCOL), quand cette appli fait un **audit d'installations
+existantes** — le point commun exploité ici est le calcul d'indicateurs de
+performance chiffrés et colorés (réel/théorique), que THMès vient d'ajouter
+et que l'appli n'avait jusque-là que sous forme de contrôles qualitatifs
+(PERF_001-003, "cohérent / pas cohérent").
+
+Sources utilisées (recherche web du jour, à jour sept. 2026) : livret
+technique SOCOL "Les Systèmes Solaires Combinés pour les bâtiments
+collectifs" (éd. 2023, www.solaire-collectif.fr), fiche technique SOCOL 2021
+"Ratios des besoins en eau chaude sanitaire...", fiche THMès (INES) et sa
+fiche Google Play, page INES "Solo 2018".
+
+34. **Schéma-type SOCOL déduit de la classification** (`domain/socol_reference.py`,
+    nouveau ; `domain/models.py::ClassificationInstallation.schema_reference_socol`).
+    Bonne surprise en explorant le code existant : les enums
+    `SystemeCapteurs`/`TypeEchangeur`/`TypeStockageSolaire` de
+    `domain/control_catalog.py` correspondaient déjà presque terme à terme
+    aux "sous-ensembles" que SOCOL utilise pour nommer ses schémas de
+    référence (REF1-SSC1, REF1-SSC2, REF3-SSC1...). `suggest_schema_reference()`
+    propose donc automatiquement un code à partir de ces 3 champs déjà
+    saisis en page "04 - Installation", où un nouveau sélecteur permet de
+    confirmer ou corriger ce choix. Limite assumée et documentée dans le
+    code : la base REFx complète (REF1 à REF5) dépend aussi du type de
+    distribution de chauffage et de la présence d'un bouclage sanitaire, des
+    informations que l'appli ne collecte pas — la suggestion reste donc un
+    point de départ, jamais une certification automatique.
+35. **Bibliothèque de schémas de principe SOCOL génériques + argumentaire**
+    (`assets/schemas_socol/*.png`, générés par `scripts/generate_schemas_socol.py`,
+    insérés en annexe du rapport DOCX par `domain/docx_service.py::_add_schema_appendix`).
+    Point de propriété intellectuelle important, documenté dans
+    `domain/socol_reference.py` : les schémas hydrauliques publiés par SOCOL
+    (livret technique, fiches PDF) sont la propriété de leurs auteurs et ne
+    sont PAS reproduits. Les 3 images du dépôt sont redessinées intégralement
+    (symboles hydrauliques génériques, palette de couleurs OPT'HELIOS) —
+    seuls le principe de fonctionnement (schéma de principe, non
+    protégeable en tant que tel) et la nomenclature SOCOL (simple
+    identifiant, utilisé comme référentiel professionnel reconnu) sont
+    repris. Couvre les 3 configurations directement déductibles des données
+    saisies (REF1-SSC1 échangeur externe, REF1-SSC2 échangeur immergé,
+    REF3-SSC1 eau technique), chacune avec un texte de principe et des
+    points de vigilance rédigés pour cette appli. Script rejouable à volonté
+    (`python scripts/generate_schemas_socol.py`), par exemple si la palette
+    de couleurs évolue.
+36. **Indicateurs de performance FSAV/Prod/Taux** (`domain/performance_service.py`,
+    nouveau). Formules du livret technique SOCOL (chapitre "Indicateurs de
+    performance") : FSAV = QSTU/(QApp+QSTU) (taux d'économie d'énergie
+    d'appoint, ISO 9488), Prod = QSTU/surface (productivité, kWh/m².an,
+    critère Fonds Chaleur ADEME), Taux = conso_aux/QSTU (part des
+    auxiliaires électriques, seuil SOCOL : doit rester sous 1,5 % pour un
+    système efficace — les bornes intermédiaires orange/rouge de l'appli
+    sont un choix OPT'HELIOS explicitement documenté comme tel dans le code,
+    pas une valeur SOCOL). Nécessite 3 nouveaux relevés "sur la période"
+    (pas des valeurs instantanées comme les autres relevés existants) :
+    "Production solaire utile sur la période (QSTU)", "Énergie d'appoint
+    sur la période (QApp)", "Consommation électrique auxiliaires sur la
+    période" — ajoutés à `domain/releves_catalog.py`, à renseigner depuis la
+    supervision/télégestion quand elle existe. Le calcul prend
+    systématiquement le relevé le plus récent en cas de saisies multiples
+    du même libellé. Affiché en page "Mesures et comparaison" (pastilles
+    colorées) et dans le rapport DOCX (section "8.2"), avec la même échelle
+    de statut réel/théorique (vert/jaune/orange/rouge selon le ratio) que le
+    point suivant.
+37. **Onglet dimensionnement et besoins ECS** (`domain/models.py::DimensionnementSolaire`,
+    nouveau sous-objet de `Installation` ; UI dans "04 - Installation" ;
+    calculs dans `domain/dimensionnement_service.py`, nouveau). Permet de
+    saisir les résultats d'une étude de dimensionnement d'origine (type
+    SOLO2018 : zone climatique, besoins ECS journaliers, taux de couverture
+    visé, productible théorique kWh/m².an, surface d'étude, référence de la
+    source) pour comparer automatiquement le réel mesuré (voir point 36) au
+    théorique attendu. Décision technique importante : PAS de
+    réimplémentation du moteur de calcul SOLO2018 (ensoleillement, calcul
+    TRNSYS) — solo2018.tecsol.fr n'a pas d'API publique et le moteur est
+    trop complexe/spécifique pour être reproduit fiablement. À la place,
+    deux approches complémentaires et réalistes : (1) saisie manuelle des
+    résultats déjà produits par une étude SOLO2018 existante, quand elle est
+    retrouvée ; (2) un **pré-dimensionnement de contrôle indépendant**,
+    utile en audit d'existant quand cette étude n'est pas retrouvée, basé
+    sur les ratios officiels de la fiche technique SOCOL 2021 (valeurs
+    exactes reprises dans `domain/dimensionnement_service.py`) : ratio
+    besoins/surface par zone climatique (40-45 l/m² zone nord, 50-75 l/m²
+    zone centre, 70-100 l/m² zone sud), ratio de volume de stockage (75-100
+    l/m² en stockage sanitaire classique, 50 l/m² minimum en eau technique),
+    taux de couverture solaire utile optimal (85-90 % sur le mois critique).
+    Ces ratios sont explicitement documentés comme des valeurs indicatives
+    de prédimensionnement, pas des seuils réglementaires stricts : les
+    fonctions renvoient un statut informatif, jamais un verdict de
+    non-conformité du catalogue de contrôles.
+38. **Sous-contrôles de sécurité surchauffe/stagnation détaillés**
+    (`domain/control_catalog.py`). Le contrôle unique et générique REG_005
+    ("Gestion des sécurités haute température et surchauffe opérationnelle")
+    est décomposé en 4 contrôles avec des seuils numériques réels (chapitre
+    3.3 du livret technique SOCOL, gestion du risque de surchauffe) :
+    REG_005 recentré sur le seul seuil de bascule de la protection
+    anti-surchauffe (60-75°C), REG_006 (nouveau) sur le seuil de stagnation
+    selon la technologie de capteur (140-150°C autoprotégé, 200-220°C
+    standard), REG_007 (nouveau) sur les consignes de stockage (~80°C) et de
+    sécurité haute température (~90°C), REG_008 (nouveau) sur le
+    dimensionnement du vase d'expansion et le tarage de la soupape de
+    sécurité. REG_006 et REG_008 sont conditionnés à
+    `systeme_capteurs_in: ["sous_pression"]` (mécanisme
+    `condition_applicabilite` déjà existant) : une installation
+    autovidangeable (drain-back) ne gère pas la stagnation de la même
+    façon et n'a pas nécessairement de vase d'expansion sur le circuit
+    solaire. L'identifiant `REG_005` est conservé tel quel (seul son
+    contenu est affiné) pour ne pas invalider un `controle_id` déjà
+    enregistré sur un audit existant.
+39. **Correctif connexe découvert en marge** (`ui/pages/_04_installation.py`) :
+    le multiselect "Type(s) de comptage" proposait les valeurs `"appoint"`
+    et `"bouclage_solaire"`, qui ne correspondaient à AUCUN membre de
+    l'enum `domain.control_catalog.TypeComptage` (les vraies valeurs sont
+    `"comptage_appoint"` et `"comptage_bouclage_solaire"`). Conséquence :
+    un contrôle du catalogue conditionné par
+    `type_comptage_any_in: ["comptage_appoint"]` ne pouvait jamais matcher,
+    même quand l'auditeur avait bien coché "Appoint" dans le formulaire —
+    bug silencieux (pas d'erreur, juste un filtrage d'applicabilité qui ne
+    se déclenchait jamais). Corrigé en alignant les valeurs proposées sur
+    l'enum réel.
+
+Tests ajoutés : `tests/test_socol_reference.py` (suggestion de schéma,
+présence des images sur le disque pour chaque code de la bibliothèque),
+`tests/test_dimensionnement_service.py` (ratios SOCOL 2021, zones
+climatiques, stockage sanitaire vs eau technique), `tests/test_performance_service.py`
+(formules FSAV/Prod/Taux, bornes du ratio réel/théorique, relevé le plus
+récent retenu en cas de doublon de libellé), `tests/test_control_catalog.py`
+(validité globale du catalogue, couverture REG_005-008, conditions
+d'applicabilité sous_pression), et deux nouveaux cas dans
+`tests/test_docx_service.py`/`tests/test_models.py` (génération du rapport
+avec et sans données SOCOL, roundtrip JSON des nouveaux champs).
 
 ## Historique des versions SharePoint (filet de sécurité en cas d'erreur)
 

@@ -18,3 +18,8 @@ Capture d'écran*.png
 # livraison intermédiaire antérieure devenue obsolète (voir CHANGES.md).
 data/
 audit-solaire-sharepoint/
+
+# Dossiers internes à l'outil Claude (assistants/skills), sans rapport avec
+# le code de l'application — ne doivent pas finir dans le dépôt GitHub.
+.claude/
+.agents/

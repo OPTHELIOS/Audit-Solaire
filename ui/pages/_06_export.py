@@ -304,9 +304,9 @@ def _render_docx_export(
 def _render_pdf_export() -> None:
     st.subheader("Export PDF")
     st.caption(
-        "Convertit le dernier rapport DOCX généré ci-dessus en PDF, en pilotant "
-        "Microsoft Word installé sur cette machine. Fonctionne en local (Windows ou Mac "
-        "avec Word installé) ; ne fonctionnera pas sur un hébergement cloud sans Word."
+        "Convertit le dernier rapport DOCX généré ci-dessus en PDF — via Microsoft Word "
+        "en local si disponible (Windows/Mac), ou via LibreOffice si l'application est "
+        "hébergée dans le cloud (voir packages.txt)."
     )
 
     docx_path = st.session_state.get("last_generated_docx_path")
@@ -316,11 +316,10 @@ def _render_pdf_export() -> None:
 
     if st.button("Convertir le dernier DOCX généré en PDF", use_container_width=True):
         try:
-            from docx2pdf import convert
+            from services.pdf_service import convert_docx_to_pdf
 
-            pdf_path = Path(docx_path).with_suffix(".pdf")
-            with st.spinner("Conversion en PDF via Word en cours...", show_time=True):
-                convert(str(docx_path), str(pdf_path))
+            with st.spinner("Conversion en PDF en cours...", show_time=True):
+                pdf_path = convert_docx_to_pdf(docx_path)
 
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
@@ -333,15 +332,10 @@ def _render_pdf_export() -> None:
                 mime="application/pdf",
                 width="stretch",
             )
-        except ImportError:
-            st.error(
-                "Le module `docx2pdf` n'est pas installé. Lance "
-                "`pip install -r requirements.txt` puis relance l'application."
-            )
         except Exception as exc:
             st.error(
-                "Échec de la conversion en PDF. Cette fonctionnalité nécessite Microsoft "
-                f"Word installé sur cette machine (Windows ou Mac). Détail : {exc}"
+                "Échec de la conversion en PDF. Nécessite Microsoft Word (en local) ou "
+                f"LibreOffice (en hébergement cloud). Détail : {exc}"
             )
 
 

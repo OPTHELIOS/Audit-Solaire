@@ -46,7 +46,23 @@ def is_configured() -> bool:
         return False
 
 
+@st.cache_resource(show_spinner=False)
 def _get_confidential_app() -> msal.ConfidentialClientApplication:
+    # CORRECTIF (lenteur ressentie sur les sauvegardes/chargements cloud,
+    # sept. 2026) : cette fonction recreait un nouveau
+    # ConfidentialClientApplication a CHAQUE appel (donc a chaque
+    # sauvegarde, chaque affichage de la page "Infos audit"...). Or c'est
+    # cet objet qui porte le cache de jetons interne a MSAL : en le
+    # recreant systematiquement, le cache etait toujours vide et
+    # `acquire_token_for_client` refaisait un aller-retour reseau complet
+    # vers Azure AD a chaque fois, alors qu'un jeton "app-only" reste valide
+    # ~60-90 min. `st.cache_resource` fait vivre UNE SEULE instance par
+    # processus serveur (partagee entre sessions, ce qui est correct ici :
+    # le jeton n'est pas propre a un auditeur, c'est un jeton applicatif),
+    # ce qui permet enfin au cache MSAL de servir a quelque chose : la
+    # plupart des appels renvoient desormais un jeton deja en memoire, sans
+    # latence reseau, particulierement sensible sur une connexion mobile en
+    # 4G depuis le terrain.
     cfg = st.secrets["microsoft_app"]
     authority = f"https://login.microsoftonline.com/{cfg['tenant_id']}"
     return msal.ConfidentialClientApplication(

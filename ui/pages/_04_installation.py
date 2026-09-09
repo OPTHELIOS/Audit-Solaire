@@ -1,5 +1,7 @@
 import streamlit as st
 
+from domain.dimensionnement_service import check_surface_vs_besoins, check_volume_stockage
+from domain.socol_reference import SOCOL_SCHEMA_LIBRARY, suggest_schema_reference
 from services.audit_service import touch_audit
 from ui.state import get_audit, save_audit
 
@@ -40,6 +42,16 @@ def _init_installation_state(audit) -> None:
         "inst_type_echangeur": installation.classification.type_echangeur or "",
         "inst_type_stockage": installation.classification.type_stockage or "",
         "inst_type_comptage": installation.classification.type_comptage or [],
+        "inst_schema_reference_socol": installation.classification.schema_reference_socol or "",
+        "inst_zone_climatique": installation.dimensionnement.zone_climatique or "",
+        "inst_besoins_ecs_l_jour": float(installation.dimensionnement.besoins_ecs_l_jour or 0.0),
+        "inst_taux_couverture_vise_pct": float(installation.dimensionnement.taux_couverture_vise_pct or 0.0),
+        "inst_productible_theorique_kwh_m2_an": float(
+            installation.dimensionnement.productible_theorique_kwh_m2_an or 0.0
+        ),
+        "inst_surface_capteurs_etude_m2": float(installation.dimensionnement.surface_capteurs_etude_m2 or 0.0),
+        "inst_source_etude": _safe_str(installation.dimensionnement.source_etude),
+        "inst_dimensionnement_commentaire": _safe_str(installation.dimensionnement.commentaire),
     }
 
     for key, value in defaults.items():
@@ -98,6 +110,24 @@ def _apply_session_to_installation(audit) -> None:
     installation.classification.type_echangeur = st.session_state["inst_type_echangeur"] or None
     installation.classification.type_stockage = st.session_state["inst_type_stockage"] or None
     installation.classification.type_comptage = st.session_state["inst_type_comptage"]
+    installation.classification.schema_reference_socol = st.session_state["inst_schema_reference_socol"] or None
+
+    installation.dimensionnement.zone_climatique = st.session_state["inst_zone_climatique"] or None
+
+    besoins_ecs = float(st.session_state["inst_besoins_ecs_l_jour"])
+    installation.dimensionnement.besoins_ecs_l_jour = besoins_ecs if besoins_ecs > 0 else None
+
+    taux_vise = float(st.session_state["inst_taux_couverture_vise_pct"])
+    installation.dimensionnement.taux_couverture_vise_pct = taux_vise if taux_vise > 0 else None
+
+    productible = float(st.session_state["inst_productible_theorique_kwh_m2_an"])
+    installation.dimensionnement.productible_theorique_kwh_m2_an = productible if productible > 0 else None
+
+    surface_etude = float(st.session_state["inst_surface_capteurs_etude_m2"])
+    installation.dimensionnement.surface_capteurs_etude_m2 = surface_etude if surface_etude > 0 else None
+
+    installation.dimensionnement.source_etude = st.session_state["inst_source_etude"] or None
+    installation.dimensionnement.commentaire = st.session_state["inst_dimensionnement_commentaire"] or None
 
 
 def _save_installation(audit) -> None:
@@ -339,14 +369,145 @@ def render():
             "Type(s) de comptage",
             [
                 "autre_comptage",
-                "appoint",
-                "bouclage_solaire",
+                # CORRECTIF (sept. 2026) : ces deux valeurs ne correspondaient pas
+                # aux membres de l'enum domain.control_catalog.TypeComptage
+                # ("comptage_appoint"/"comptage_bouclage_solaire", pas
+                # "appoint"/"bouclage_solaire") — un contrôle du catalogue
+                # conditionné par `type_comptage_any_in: ["comptage_appoint"]`
+                # ne pouvait donc jamais matcher un type de comptage choisi ici,
+                # même quand l'auditeur l'avait bien sélectionné.
+                "comptage_appoint",
+                "comptage_bouclage_solaire",
                 "solaire_primaire",
                 "solaire_utile_direct",
                 "solaire_utile_indirect",
             ],
             key="inst_type_comptage",
         )
+
+        st.subheader("Schéma de référence SOCOL")
+        st.caption(
+            "Rattachement à la nomenclature des schémas de principe du référentiel "
+            "SOCOL (solaire thermique collectif), utilisée pour insérer en annexe du "
+            "rapport le schéma de principe correspondant et son argumentaire technique."
+        )
+
+        schema_options = [""] + list(SOCOL_SCHEMA_LIBRARY.keys()) + ["autre_non_determine"]
+        current_schema = st.session_state["inst_schema_reference_socol"]
+        if current_schema not in schema_options:
+            current_schema = ""
+
+        suggestion = suggest_schema_reference(
+            st.session_state["inst_systeme_capteurs"] or None,
+            st.session_state["inst_type_echangeur"] or None,
+            st.session_state["inst_type_stockage"] or None,
+        )
+        if suggestion and not current_schema:
+            st.info(
+                f"Suggestion à partir de la classification ci-dessus : **{suggestion}** "
+                "— à confirmer (la base REFx complète dépend aussi du type de distribution "
+                "et du bouclage sanitaire, non saisis dans l'appli)."
+            )
+
+        st.selectbox(
+            "Schéma de référence SOCOL",
+            schema_options,
+            index=schema_options.index(current_schema),
+            key="inst_schema_reference_socol",
+            format_func=lambda v: (
+                "— (non déterminé) —" if v == "" else
+                "Autre / non déterminé" if v == "autre_non_determine" else
+                SOCOL_SCHEMA_LIBRARY[v].libelle
+            ),
+        )
+
+        st.subheader("Dimensionnement et besoins ECS")
+        st.caption(
+            "Éléments de l'étude de dimensionnement d'origine (type SOLO2018), quand elle "
+            "est retrouvée, pour objectiver le réel mesuré face au théorique attendu dans "
+            "la page « Mesures et comparaison ». À défaut d'étude retrouvée, les ratios "
+            "officiels de la fiche SOCOL 2021 permettent un pré-dimensionnement de contrôle."
+        )
+
+        zone_options = ["", "nord", "centre", "sud"]
+        current_zone = st.session_state["inst_zone_climatique"]
+        if current_zone not in zone_options:
+            current_zone = ""
+
+        col_dim1, col_dim2 = st.columns(2)
+        with col_dim1:
+            st.selectbox(
+                "Zone climatique (fiche ratios SOCOL 2021)",
+                zone_options,
+                index=zone_options.index(current_zone),
+                key="inst_zone_climatique",
+                format_func=lambda v: {
+                    "": "— non renseignée —",
+                    "nord": "1/3 nord de la France",
+                    "centre": "1/3 centre de la France",
+                    "sud": "1/3 sud de la France",
+                }[v],
+            )
+        with col_dim2:
+            st.number_input(
+                "Besoins ECS (L/jour à 60 °C)",
+                min_value=0.0,
+                step=10.0,
+                key="inst_besoins_ecs_l_jour",
+            )
+
+        col_dim3, col_dim4 = st.columns(2)
+        with col_dim3:
+            st.number_input(
+                "Taux de couverture solaire visé (%)",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                key="inst_taux_couverture_vise_pct",
+            )
+        with col_dim4:
+            st.number_input(
+                "Productible théorique (kWh/m².an)",
+                min_value=0.0,
+                step=10.0,
+                key="inst_productible_theorique_kwh_m2_an",
+            )
+
+        st.number_input(
+            "Surface de capteurs prévue à l'étude (m², si différente du réel installé)",
+            min_value=0.0,
+            step=0.5,
+            key="inst_surface_capteurs_etude_m2",
+        )
+
+        st.text_input(
+            "Source de l'étude",
+            key="inst_source_etude",
+            placeholder="Ex. Note de dimensionnement SOLO2018 du 12/03/2019, bureau d'études XXX",
+        )
+
+        st.text_area(
+            "Commentaire dimensionnement",
+            key="inst_dimensionnement_commentaire",
+            height=80,
+        )
+
+        # Pré-dimensionnement de contrôle (fiche ratios SOCOL 2021) — aperçu
+        # calculé à partir des valeurs actuellement saisies dans le formulaire ;
+        # voir domain/dimensionnement_service.py pour la source des ratios.
+        surface_reelle = surface_totale_calculee if surface_totale_calculee > 0 else None
+        volume_reel = float(st.session_state["inst_volume_total_litres"]) or None
+        besoins_courant = float(st.session_state["inst_besoins_ecs_l_jour"]) or None
+        zone_courante = st.session_state["inst_zone_climatique"] or None
+        type_stockage_courant = st.session_state["inst_type_stockage"] or None
+
+        check_surface = check_surface_vs_besoins(surface_reelle, besoins_courant, zone_courante)
+        if check_surface.valeur is not None:
+            (st.success if check_surface.dans_la_plage else st.warning)(check_surface.commentaire)
+
+        check_stockage = check_volume_stockage(volume_reel, surface_reelle, type_stockage_courant)
+        if check_stockage.valeur is not None:
+            (st.success if check_stockage.dans_la_plage else st.warning)(check_stockage.commentaire)
 
         submitted = st.form_submit_button("Enregistrer l'installation", type="primary")
 

@@ -61,6 +61,11 @@ def _criticite_rank(value: str) -> int:
         Criticite.critique.value: 0,
         Criticite.majeure.value: 1,
         Criticite.mineure.value: 2,
+        # "information" n'est pas un ecart a corriger : trie apres les 3
+        # niveaux de non-conformite, mais explicitement (evite de dependre du
+        # fallback 99, voir domain/models.py::Criticite pour le contexte du
+        # 4e niveau).
+        Criticite.information.value: 3,
     }
     return order.get(value, 99)
 
@@ -81,6 +86,7 @@ def _criticite_to_label(criticite: str) -> str:
         Criticite.critique.value: "critique",
         Criticite.majeure.value: "majeure",
         Criticite.mineure.value: "mineure",
+        Criticite.information.value: "information",
     }
     return labels.get(criticite, criticite)
 

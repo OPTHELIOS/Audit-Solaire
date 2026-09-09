@@ -4,6 +4,7 @@ from typing import Any
 
 import streamlit as st
 
+from domain.performance_service import compute_performance_indicators
 from domain.releves_catalog import RELEVES_CATALOG
 from repositories.sharepoint_repository import SharePointNotConfigured, list_audits, load_audit
 from services.audit_service import touch_audit
@@ -122,6 +123,44 @@ def _render_releves_list(audit: Any) -> None:
                 st.rerun()
 
 
+def _render_indicator_badge(label: str, statut) -> None:
+    st.markdown(
+        f"<span style='color:#{statut.couleur};font-weight:bold;'>● {label} : {statut.label}</span>"
+        f"<br><span style='font-size:0.85em;color:#3A3A3A;'>{statut.commentaire}</span>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_performance_indicators(audit: Any) -> None:
+    st.subheader("Indicateurs de performance (nomenclature SOCOL)")
+    st.caption(
+        "FSAV (taux d'économie d'énergie d'appoint), Prod (productivité kWh/m².an) et "
+        "Taux (part des auxiliaires électriques), calculés à partir des relevés d'énergie "
+        "« sur la période » ci-dessous, comparés au théorique renseigné en page "
+        "« 04 - Installation » (section Dimensionnement) — même logique que le ratio "
+        "réel/théorique affiché par les outils de mise en service du marché."
+    )
+
+    indicators = compute_performance_indicators(audit)
+
+    if indicators["qstu_kwh"] is None and indicators["qapp_kwh"] is None and indicators["conso_aux_kwh"] is None:
+        st.info(
+            "Aucun relevé d'énergie « sur la période » n'est encore saisi. Ajoutez, via le "
+            "formulaire ci-dessus, les relevés « Production solaire utile sur la période "
+            "(QSTU) », « Énergie d'appoint sur la période (QApp) » et/ou « Consommation "
+            "électrique auxiliaires sur la période » pour faire apparaître ces indicateurs."
+        )
+        return
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        _render_indicator_badge("FSAV (taux de couverture)", indicators["fsav_statut"])
+    with col2:
+        _render_indicator_badge("Prod (productivité)", indicators["prod_statut"])
+    with col3:
+        _render_indicator_badge("Taux (auxiliaires)", indicators["taux_statut"])
+
+
 def _render_comparison(audit: Any) -> None:
     st.subheader("Comparer avec un audit antérieur")
     st.caption(
@@ -208,5 +247,7 @@ def render() -> None:
     _render_add_releve_form(audit)
     st.divider()
     _render_releves_list(audit)
+    st.divider()
+    _render_performance_indicators(audit)
     st.divider()
     _render_comparison(audit)

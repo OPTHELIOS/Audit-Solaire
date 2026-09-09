@@ -353,6 +353,15 @@ def extract_findings(
     audit = _get_audit(session_state)
     findings = []
 
+    # CORRECTIF (bug reel : "Erreur lors de la generation du DOCX : 'impact'")
+    # `_add_action_plan` (domain/docx_service.py) lit `item["impact"]` pour
+    # chaque ligne du plan d'actions, mais ce champ n'a jamais ete produit
+    # ici : le generateur DOCX plantait donc systematiquement des qu'un
+    # constat non conforme existait. On reprend l'impact par defaut defini
+    # dans le catalogue de controles (`ControleCatalogueItem.impact_defaut`)
+    # quand il est disponible.
+    impacts_catalogue = {item.controle_id: item.impact_defaut for item in CONTROL_CATALOG}
+
     for constat in audit.constats:
         if constat.verdict not in {
             VerdictControle.non_conforme,
@@ -372,6 +381,7 @@ def extract_findings(
                 "recommandation": constat.recommandation_personnalisee or constat.recommandation or "",
                 "preuve_documentaire": constat.preuve_documentaire or "",
                 "photos": list(constat.photos or []),
+                "impact": impacts_catalogue.get(constat.controle_id) or "",
             }
         )
 
@@ -398,6 +408,7 @@ def build_action_plan(
                 "controle_id": row["controle_id"],
                 "section": row["section"],
                 "objet": row["libelle"],
+                "impact": row.get("impact") or "",
                 "action_recommandee": row.get("recommandation") or "Définir une action corrective adaptée.",
                 "preuve_associee": row.get("preuve_documentaire", ""),
             }

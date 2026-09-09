@@ -1,0 +1,14 @@
+# Thème Streamlit natif OPT'HELIOS (ajouté sept. 2026, "présentation pro").
+# Jusqu'ici l'appli tournait avec le thème générique par défaut de
+# Streamlit (bleu Streamlit standard) : boutons, sélections, curseurs...
+# rien ne rappelait la charte OPT'HELIOS utilisée sur les rapports DOCX.
+# Ce fichier applique les mêmes codes exacts (voir
+# domain/opthelios_style.py et la compétence opthelios-notes-techniques)
+# sans toucher au code : Streamlit lit ce thème automatiquement au
+# démarrage.
+[theme]
+primaryColor = "#F9B13A"            # Or/doré — boutons, éléments actifs, sélections
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F1E4" # Crème très clair — sidebar, fonds de widgets
+textColor = "#1C1E3D"                # Bleu marine — cohérent avec les titres du rapport
+font = "sans serif"

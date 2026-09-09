@@ -4,6 +4,8 @@
 from domain.control_catalog import CONTROL_CATALOG
 from domain.control_service import (
     append_uploaded_evidences,
+    build_action_plan,
+    extract_findings,
     get_applicable_controls,
     get_or_create_constat,
     reset_response,
@@ -75,6 +77,34 @@ def test_append_uploaded_evidences_returns_all_and_new_paths(tmp_path):
     assert len(new_paths) == 1
     assert new_paths[0].endswith("a.jpg")
     assert (base_dir / "CTRL-1" / "a.jpg").exists()
+
+
+def test_extract_findings_and_action_plan_include_impact_key():
+    # Regression : domain/docx_service.py::_add_action_plan lit
+    # `item["impact"]` (colonne "Impact" du tableau du plan d'actions) sans
+    # valeur par defaut. Cette cle n'etait jamais produite par
+    # extract_findings/build_action_plan -> generer le DOCX plantait avec
+    # `KeyError: 'impact'` des qu'un audit contenait un constat non
+    # conforme. Voir CHANGES.md.
+    audit = Audit()
+    session_state = {"audit": audit}
+    controle_id = get_applicable_controls(audit)[0].controle_id
+
+    update_response(
+        session_state,
+        controle_id,
+        verdict="non_conforme",
+        observation="Défaut constaté",
+        criticite_finale="majeure",
+    )
+
+    findings = extract_findings(session_state)
+    assert findings, "un constat non conforme doit apparaitre dans les findings"
+    assert "impact" in findings[0]
+
+    actions = build_action_plan(session_state)
+    assert actions, "un constat non conforme doit generer une action"
+    assert "impact" in actions[0]
 
 
 def test_append_uploaded_evidences_no_new_files_keeps_existing(tmp_path):

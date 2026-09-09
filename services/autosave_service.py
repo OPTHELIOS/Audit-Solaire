@@ -11,20 +11,33 @@ quel appareil, tant que les secrets `microsoft_app` sont configures.
 
 Toute erreur (secrets absents, reseau indisponible, permissions Azure AD
 non accordees...) est avalee : l'autosave ne doit jamais faire planter une
-page ni interrompre la saisie de l'auditeur.
+page ni interrompre la saisie de l'auditeur. CORRECTIF (visibilite de
+l'echec, sept. 2026 — retour utilisateur : reseau mobile faible en
+chaufferie) : cette fonction renvoyait un simple bool, et le SEUL retour
+utilisateur etait un toast affiche UNIQUEMENT en cas de succes. En cas
+d'echec (reseau indisponible, ce qui est precisement le scenario "mauvaise
+reception en chaufferie"), rien n'etait affiche : l'auditeur n'avait aucun
+moyen de savoir que ses saisies ne partaient plus vers le cloud, avec un
+risque de croire a tort que tout est sauvegarde. Le retour est desormais un
+tri-etat (True = synchronise, False = cloud configure mais tentative
+echouee, None = cloud non configure / rien a tenter) : voir `ui/state.py`
+pour l'affichage (indicateur permanent dans la barre laterale + notification
+uniquement sur changement d'etat, pour ne pas spammer de toasts d'echec
+toutes les 20 secondes en zone blanche).
 """
 
 from __future__ import annotations
-
-import streamlit as st
 
 from domain.models import Audit
 from services.sharepoint_auth import is_configured
 
 
-def try_autosave_to_cloud(audit: Audit) -> bool:
+def try_autosave_to_cloud(audit: Audit) -> bool | None:
+    """True = sauvegarde cloud reussie. False = cloud configure mais la
+    tentative a echoue (reseau, permissions...). None = cloud non
+    configure, aucune tentative faite."""
     if not is_configured():
-        return False
+        return None
 
     try:
         from repositories.sharepoint_repository import save_audit as save_audit_sharepoint
@@ -32,11 +45,6 @@ def try_autosave_to_cloud(audit: Audit) -> bool:
         save_audit_sharepoint(audit)
     except Exception:
         return False
-
-    try:
-        st.toast("Sauvegarde automatique effectuée.", icon="☁️")
-    except Exception:
-        pass
 
     return True
 

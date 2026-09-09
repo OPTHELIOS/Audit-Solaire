@@ -27,9 +27,19 @@ class VerdictControle(str, Enum):
 
 
 class Criticite(str, Enum):
+    # CORRECTIF (bug reel rencontre en usage) : ce modele n'avait que 3
+    # niveaux, alors que domain/control_catalog.py::Criticite (catalogue de
+    # controles + selecteur "Criticite retenue" de la page Controles
+    # techniques) en propose 4, dont "information". Un audit ou l'auditeur
+    # choisit "Information" pour un point s'enregistrait localement sans
+    # erreur (l'assignation Python n'est pas validee), mais devenait
+    # impossible a recharger : `Audit.model_validate(...)` rejette alors la
+    # valeur "information" comme invalide pour ce champ. Les deux enums
+    # doivent rester alignees.
     mineure = "mineure"
     majeure = "majeure"
     critique = "critique"
+    information = "information"
 
 
 class TypeMesure(str, Enum):
@@ -133,6 +143,36 @@ class ClassificationInstallation(BaseModel):
     type_echangeur: Optional[str] = None
     type_stockage: Optional[str] = None
     type_comptage: list[str] = Field(default_factory=list)
+    # AJOUT (demande utilisateur, sept. 2026) : rattachement de l'installation
+    # à la nomenclature des schémas de référence SOCOL (charte solaire
+    # thermique collectif, ex. "REF1-SSC1"), voir domain/socol_reference.py.
+    # Champ texte libre (pas un enum strict) car la base REFx complète (1 à 5,
+    # qui dépend du type de distribution/bouclage) n'est pas déductible avec
+    # certitude des seules données saisies ici : une valeur est suggérée
+    # automatiquement (voir socol_reference.suggest_schema_reference) mais
+    # reste modifiable par l'auditeur.
+    schema_reference_socol: Optional[str] = None
+
+
+class DimensionnementSolaire(BaseModel):
+    """Éléments de dimensionnement d'origine (étude de faisabilité, note de
+    calcul type SOLO2018) et paramètres de référence utilisés pour comparer
+    le réel mesuré au théorique attendu — voir
+    `domain/dimensionnement_service.py` (ratios officiels de la fiche SOCOL
+    2021) et `domain/performance_service.py` (indicateurs FSAV/Prod/Taux et
+    ratio réel/théorique). Aucun champ n'est obligatoire : quand l'étude
+    d'origine n'a pas été retrouvée (cas fréquent en audit d'existant), les
+    contrôles de cohérence se basent uniquement sur les ratios SOCOL par
+    défaut et la zone climatique.
+    """
+
+    zone_climatique: Optional[str] = None  # "nord" / "centre" / "sud" (fiche ratios SOCOL 2021)
+    besoins_ecs_l_jour: Optional[float] = None
+    taux_couverture_vise_pct: Optional[float] = None
+    productible_theorique_kwh_m2_an: Optional[float] = None
+    surface_capteurs_etude_m2: Optional[float] = None
+    source_etude: Optional[str] = None
+    commentaire: Optional[str] = None
 
 
 class Installation(BaseModel):
@@ -151,6 +191,7 @@ class Installation(BaseModel):
     champ_capteurs: ChampCapteurs = Field(default_factory=ChampCapteurs)
     stockage_solaire: StockageSolaire = Field(default_factory=StockageSolaire)
     equipements: EquipementsTechniques = Field(default_factory=EquipementsTechniques)
+    dimensionnement: DimensionnementSolaire = Field(default_factory=DimensionnementSolaire)
 
 
 class ControleCatalogueItem(BaseModel):

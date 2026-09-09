@@ -1,0 +1,28 @@
+# IMPORTANT : .streamlit/secrets.toml ne doit JAMAIS être copié dans
+# l'image Docker (une image peut finir dans un registre partagé). Les
+# secrets `microsoft_app` (tenant_id, client_id, client_secret, site_id)
+# doivent être injectés au RUNTIME via les variables d'environnement ou le
+# mécanisme de secrets de l'hébergeur choisi (voir CHANGES.md), pas au
+# moment du build.
+.streamlit/secrets.toml
+certificats et secrets.txt
+*secret*.txt
+*.pem
+Capture d'écran*.png
+
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+output/
+data/
+*.egg-info/
+.DS_Store
+audit-solaire-sharepoint/
+.claude/
+.agents/
+tests/
+requirements-dev.txt
+CHANGES.md

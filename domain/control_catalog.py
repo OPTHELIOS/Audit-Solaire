@@ -1020,15 +1020,72 @@ CONTROL_CATALOG: list[ControleCatalogueItem] = [
     _item(
         controle_id="REG_005",
         section="Régulation et automatismes",
-        libelle="Gestion des sécurités haute température et surchauffe opérationnelle",
-        methode_verification="Lecture paramètres, entretien exploitant et observation des historiques si disponibles.",
-        criticite=Criticite.critique,
-        impact="Vieillissement accéléré, arrêts répétés et pertes de disponibilité.",
-        recommandation="Mettre en place une stratégie de sécurité thermique adaptée.",
-        preuve="Paramètres, historiques et observations terrain.",
+        # CORRECTIF (demande utilisateur, sept. 2026, "seuils de sécurité
+        # surchauffe détaillés") : ce contrôle unique et générique
+        # ("Gestion des sécurités haute température et surchauffe
+        # opérationnelle") est décomposé en 4 sous-contrôles avec les seuils
+        # numériques réels du livret technique SOCOL (chapitre 3.3, gestion
+        # du risque de surchauffe/stagnation), pour objectiver le contrôle
+        # au lieu d'une appréciation qualitative. REG_005 lui-même est
+        # recentré sur le seul seuil de bascule (l'ID est conservé pour ne
+        # pas invalider un controle_id déjà enregistré sur un audit existant
+        # — voir REG_006/007/008 ci-dessous pour les nouveaux seuils).
+        libelle="Seuil de bascule de la protection anti-surchauffe conforme (60-75 °C)",
+        methode_verification=(
+            "Lecture du seuil de bascule (déclenchement évacuation/arrêt de circulation) "
+            "sur le régulateur et comparaison à la plage usuelle 60-75°C."
+        ),
+        criticite=Criticite.majeure,
+        impact="Basculement de sécurité trop tardif ou trop précoce, sollicitation excessive du fluide et des composants.",
+        recommandation="Ajuster le seuil de bascule dans la plage recommandée et vérifier son déclenchement effectif.",
+        preuve="Capture des paramètres régulateur.",
         tags=("regulation", "surchauffe", "securite"),
-        sources=("tecsol_ines",),
+        sources=("tecsol_ines", "socol_mes"),
         ordre=550,
+    ),
+    _item(
+        controle_id="REG_006",
+        section="Régulation et automatismes",
+        libelle="Seuil de stagnation / protection capteur cohérent avec la technologie (140-150 °C autoprotégé, 200-220 °C standard)",
+        methode_verification=(
+            "Identification de la technologie de capteur (autoprotégé ou standard) et "
+            "vérification du seuil de gestion de la stagnation paramétré ou observé."
+        ),
+        criticite=Criticite.majeure,
+        impact="Vieillissement accéléré du fluide caloporteur et des composants en cas de stagnation mal gérée.",
+        recommandation="Adapter la stratégie de gestion de la stagnation à la technologie de capteur installée.",
+        preuve="Fiche technique capteur et paramètres régulateur.",
+        condition={"systeme_capteurs_in": ["sous_pression"]},
+        tags=("regulation", "surchauffe", "securite", "stagnation"),
+        sources=("socol_mes",),
+        ordre=551,
+    ),
+    _item(
+        controle_id="REG_007",
+        section="Régulation et automatismes",
+        libelle="Consignes de température de stockage (~80 °C) et de sécurité haute température (~90 °C) conformes",
+        methode_verification="Lecture des consignes régulateur et comparaison aux valeurs usuelles de la profession.",
+        criticite=Criticite.majeure,
+        impact="Confort/sécurité ECS dégradés ou sollicitation excessive de la sécurité haute température.",
+        recommandation="Reprendre les consignes de température de stockage et de sécurité haute température.",
+        preuve="Capture des paramètres régulateur.",
+        tags=("regulation", "surchauffe", "securite"),
+        sources=("socol_mes",),
+        ordre=552,
+    ),
+    _item(
+        controle_id="REG_008",
+        section="Régulation et automatismes",
+        libelle="Vase d'expansion et soupape(s) de sécurité du circuit primaire dimensionnés et tarage vérifié",
+        methode_verification="Contrôle visuel du vase d'expansion, lecture du tarage de la ou des soupapes de sécurité et cohérence avec la pression de service.",
+        criticite=Criticite.critique,
+        impact="Risque de surpression ou d'ouverture intempestive de la soupape en cas de stagnation.",
+        recommandation="Revoir le dimensionnement du vase d'expansion et faire vérifier le tarage de la soupape.",
+        preuve="Photo vase d'expansion et plaque de tarage soupape.",
+        condition={"systeme_capteurs_in": ["sous_pression"]},
+        tags=("regulation", "surchauffe", "securite", "vase_expansion"),
+        sources=("socol_mes",),
+        ordre=553,
     ),
     _item(
         controle_id="MET_001",
