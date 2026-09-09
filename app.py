@@ -273,6 +273,14 @@ def render_infos_audit() -> None:
 
 
 def main() -> None:
+    # PORTAIL D'ACCES — avant toute autre chose : ni initialisation de
+    # session, ni lecture d'audit, ni appel SharePoint tant que
+    # l'utilisateur n'est pas authentifie. Import local, coherent avec les
+    # imports paresseux adoptes dans le reste de ce fichier.
+    from services.app_auth import render_user_sidebar, require_login
+
+    require_login(LOGO_PATH if logo is not None else None)
+
     init_session_state()
 
     if logo is not None:
@@ -326,6 +334,10 @@ def main() -> None:
         _06_export.render()
     elif page == "Infos audit":
         render_infos_audit()
+
+    # En pied de barre laterale, donc sous les filtres que certaines pages
+    # y ajoutent : identite connectee et bouton de deconnexion.
+    render_user_sidebar()
 
 
 if __name__ == "__main__":

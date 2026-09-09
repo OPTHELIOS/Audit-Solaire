@@ -8,6 +8,10 @@
 # d'erreur. Avant de relever cette version, rejouer le build Docker et verifier
 # que le log affiche bien "[patch_streamlit_pwa] OK".
 streamlit==1.62.0
+# Requis par `st.login()` / `st.user`, sur lesquels repose le controle
+# d'acces de l'appli (voir services/app_auth.py). Streamlit ne l'installe
+# pas de lui-meme : sans cette ligne, la connexion echoue au moment du clic.
+Authlib>=1.3.2
 pydantic
 folium
 streamlit-folium
