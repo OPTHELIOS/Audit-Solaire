@@ -1,4 +1,10 @@
-.streamlit/secrets.toml
+# Motif volontairement elargi (`*`) : la regle ne couvrait que le nom exact,
+# si bien qu'une copie de travail — secrets.toml.bak, .old, .save produite
+# par un editeur ou par une manipulation — se serait retrouvee visible de
+# Git avec de vrais identifiants Azure dedans.
+.streamlit/secrets.toml*
+# ... sauf le modele sans valeurs reelles, lui destine a etre versionne.
+!.streamlit/secrets.toml.example
 __pycache__/
 *.pyc
 .venv/
