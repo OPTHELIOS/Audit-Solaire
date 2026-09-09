@@ -1,0 +1,29 @@
+# Fins de ligne — garde-fou pour le build Docker.
+#
+# Cette machine de développement est sous Windows avec `core.autocrlf=true` :
+# git convertit les fichiers texte en CRLF à chaque extraction. Or les
+# fichiers ci-dessous sont lus par un shell Linux à l'intérieur de l'image
+# Docker, où un CRLF est fatal et le message d'erreur trompeur :
+#   - docker-entrypoint.sh en CRLF -> le shebang devient "/bin/sh\r", le
+#     conteneur démarre puis meurt sur un "not found" désignant le shell et
+#     non le script, piège classique ;
+#   - packages.txt en CRLF -> `xargs` transmet "libreoffice\r" à apt-get,
+#     qui ne trouve pas le paquet et fait échouer le build.
+#
+# Sans ce fichier, tout fonctionne tant que personne ne réextrait ces
+# fichiers sous Windows — puis casse sans raison apparente le jour où
+# quelqu'un clone le dépôt ou change de branche.
+
+*.sh            text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile      text eol=lf
+packages.txt    text eol=lf
+requirements.txt text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+
+# Ressources binaires : jamais de conversion de fins de ligne.
+*.png binary
+*.ico binary
+*.docx binary
+*.pdf binary

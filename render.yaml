@@ -1,0 +1,55 @@
+# Blueprint Render — déploiement de l'appli OPT'HELIOS Audit Solaire
+# Thermique en mode "appli iPhone/tablette" (voir CHANGES.md).
+#
+# POURQUOI RENDER ET PAS STREAMLIT COMMUNITY CLOUD : le mode application
+# installable (icône d'écran d'accueil, plein écran sans barre Safari,
+# service worker) repose sur `scripts/patch_streamlit_pwa.py`, qui ne
+# s'exécute qu'au build de l'image Docker. Community Cloud ne construit pas
+# d'image Docker : l'appli y fonctionnerait, mais sans aucune de ces
+# caractéristiques. Render construit le Dockerfile, et accepte un nom de
+# domaine personnalisé.
+#
+# UTILISATION : dans Render, "New +" > "Blueprint", puis sélectionner ce
+# dépôt. Render lit ce fichier et crée le service. Le secret n'y figure
+# pas et ne doit jamais y figurer : voir l'étape "Secret File" ci-dessous.
+
+services:
+  - type: web
+    name: opthelios-audit-solaire
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # Francfort : le centre de données le plus proche de la France, donc la
+    # latence la plus faible pour des auditeurs en déplacement. Une latence
+    # élevée est particulièrement pénalisante ici, Streamlit renvoyant
+    # chaque interaction au serveur par websocket.
+    region: frankfurt
+
+    # ATTENTION, CHOIX PAYANT (7 $/mois). Le palier gratuit met le service
+    # en veille après 15 min d'inactivité ; le réveil rechargerait une image
+    # contenant LibreOffice (~1 Go), soit 30 à 60 s d'écran de chargement.
+    # Sur un téléphone, lancée depuis l'écran d'accueil, l'appli paraîtrait
+    # simplement plantée. Remplacer par `free` pour tester sans engagement,
+    # en acceptant ce délai au premier accès de la journée.
+    plan: starter
+
+    # Branche déployée. À faire évoluer si la reconstruction devient un jour
+    # la branche principale du dépôt (voir la question ouverte sur `main`).
+    branch: fix/sauvegarde-auto-et-bugs
+    autoDeploy: true
+
+    # Endpoint de santé natif de Streamlit, déjà utilisé par le HEALTHCHECK
+    # du Dockerfile.
+    healthCheckPath: /_stcore/health
+
+    envVars:
+      # Fixé explicitement pour rester cohérent avec EXPOSE et HEALTHCHECK
+      # dans le Dockerfile, qui se replient tous deux sur 8501. Sans cette
+      # ligne, Render imposerait 10000 et les trois valeurs divergeraient.
+      - key: PORT
+        value: 8501
+      # Streamlit envoie sinon des statistiques d'usage anonymes à chaque
+      # démarrage : inutile ici, et une requête sortante de moins.
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
