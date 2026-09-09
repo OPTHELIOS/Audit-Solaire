@@ -603,12 +603,208 @@ Container Apps, Render, Fly.io, Railway...).
    minutes à quelques heures ; Render émet ensuite automatiquement le
    certificat HTTPS une fois le CNAME détecté.
 
-**Accès protégé (optionnel, mentionné en passant précédemment) :** un
-identifiant/mot de passe simple pour l'appli elle-même (distinct de
-l'authentification `microsoft_app`, qui ne protège que l'accès à
-SharePoint) reste possible à ajouter — via `streamlit-authenticator` ou,
-plus robuste, une connexion Microsoft Entra ID puisque le tenant existe
-déjà. Pas fait pour l'instant, à la demande.
+**Accès protégé : FAIT** (sept. 2026, voir la section "Contrôle d'accès à
+l'application" plus bas). L'option retenue est la connexion Microsoft Entra
+ID, plus robuste qu'un mot de passe partagé et cohérente avec un locataire
+M365 déjà en place. À ne pas confondre avec l'authentification
+`microsoft_app`, qui ne protège que l'accès à SharePoint et laissait l'appli
+elle-même ouverte à quiconque connaissait l'URL.
+
+## Publication en mode application iPhone/tablette (sept. 2026)
+
+Objectif retenu : l'appli s'installe sur l'écran d'accueil d'un iPhone ou
+d'un iPad et s'ouvre en plein écran, sans barre d'adresse. Pas de coque
+native, pas de compte développeur Apple, pas de validation App Store — la
+voie PWA, distribution par simple lien.
+
+Décision prise en amont : le fonctionnement **hors réseau n'est pas requis**
+(réseau fiable sur les sites audités). C'est ce qui rend Streamlit adapté
+ici. Streamlit pilote l'écran par websocket permanente : sans réseau, ce
+n'est pas un mode dégradé, c'est un écran figé. Si un jour des audits ont
+lieu en zone blanche, la seule réponse sérieuse serait de refaire le front
+en mode "offline-first" (React ou Flutter + synchronisation), pas d'ajuster
+la configuration.
+
+### Ce qui a été ajouté
+
+40. **Service worker** (`assets/pwa/sw.js`, `assets/pwa/offline.html`,
+    nouveaux) : deux raisons d'exister, et la mise en cache de l'appli n'en
+    fait volontairement pas partie. D'abord l'installabilité sur Android —
+    Chrome n'affiche sa bannière "Installer l'application" que si la page
+    déclare un service worker muni d'un gestionnaire `fetch` (sur iOS,
+    l'ajout reste de toute façon toujours manuel, via le menu Partager de
+    Safari). Ensuite le remplacement de la page d'erreur brute du navigateur
+    par un écran aux couleurs OPT'HELIOS en cas de coupure : lancée depuis
+    l'écran d'accueil, l'appli semblait sinon avoir planté. Cet écran est
+    autonome (aucune ressource externe, logo en SVG inline — rien ne peut
+    être téléchargé au moment où il s'affiche) et se recharge tout seul au
+    retour du réseau.
+
+    **Ce qui n'est pas fait, et pourquoi :** le code de l'appli n'est pas
+    mis en cache. Streamlit sert un bundle JS versionné ; un cache agressif
+    finirait un jour par servir un bundle périmé face à un serveur à jour,
+    panne dont l'utilisateur ne peut pas sortir. Tout ce qui n'est pas une
+    icône précachée part au réseau, et les endpoints `/_stcore/` (websocket,
+    santé, envoi de fichiers) ne sont jamais interceptés.
+
+41. **Version de Streamlit épinglée** (`requirements.txt`) : `streamlit`
+    était non épinglé. Or `scripts/patch_streamlit_pwa.py` modifie le
+    `index.html` compilé **à l'intérieur du paquet Streamlit**, structure
+    interne couverte par aucune garantie de compatibilité. Le patch étant
+    défensif, une montée de version ne planterait pas — elle désactiverait
+    le mode "appli" **en silence**, sans le moindre message. D'où
+    `streamlit==1.62.0`. Avant de relever cette version : rejouer le build
+    Docker et vérifier que le log affiche bien `[patch_streamlit_pwa] OK`.
+
+42. **Configuration Render versionnée** (`render.yaml`, nouveau) : la
+    configuration du service vit dans le dépôt plutôt que dans des champs du
+    tableau de bord. Région Francfort (la latence compte : Streamlit renvoie
+    chaque interaction au serveur), `PORT` fixé à 8501 pour rester cohérent
+    avec `EXPOSE` et `HEALTHCHECK` du Dockerfile, contrôle de santé sur
+    `/_stcore/health`. Le palier `starter` (payant, 7 $/mois) est retenu
+    délibérément : sur le palier gratuit, la mise en veille imposerait 30 à
+    60 s de rechargement d'une image contenant LibreOffice (~1 Go) — sur un
+    téléphone, lancée depuis l'écran d'accueil, l'appli paraîtrait
+    simplement plantée. Remplacer par `free` pour tester sans engagement.
+
+43. **Garde-fou sur les fins de ligne** (`.gitattributes`, nouveau) : la
+    machine de développement est sous Windows avec `core.autocrlf=true`, et
+    le dépôt n'avait aucun `.gitattributes`. Le dépôt est sain aujourd'hui,
+    mais la prochaine extraction sous Windows convertirait
+    `docker-entrypoint.sh` en CRLF — le shebang devient alors `/bin/sh\r`,
+    et le conteneur meurt sur un `not found` qui désigne le shell et non le
+    script, piège classique et difficile à diagnostiquer — et
+    `packages.txt` en CRLF ferait échouer le build (`apt-get` recevrait
+    `libreoffice\r`). Les `.py` sont volontairement laissés au comportement
+    actuel, pour éviter une renormalisation de tout le dépôt.
+
+### Reste à faire côté toi
+
+Créer le service sur Render (`New → Blueprint`, sélectionner ce dépôt :
+Render lit `render.yaml`), puis déposer le Secret File nommé exactement
+`secrets.toml` — `docker-entrypoint.sh` le recopie au démarrage. Compter
+une dizaine de minutes pour le premier build, LibreOffice étant volumineux.
+
+Ensuite, sur iPhone : ouvrir l'URL dans **Safari** (pas Chrome, l'ajout à
+l'écran d'accueil n'y fonctionne pas sous iOS) → Partager → **Sur l'écran
+d'accueil**.
+
+**Point à vérifier dès le premier essai sur iPhone :**
+`scripts/patch_streamlit_pwa.py` déclare
+`apple-mobile-web-app-status-bar-style` à `black-translucent`, ce qui fait
+passer le contenu **sous** la barre d'état iOS. Streamlit affichant sa
+propre barre d'outils tout en haut, le menu hamburger risque d'être
+partiellement masqué. Si c'est le cas, basculer cette valeur sur `default` —
+un seul mot à changer. Cela se constate en trois secondes sur un vrai
+téléphone, d'où le choix de ne pas trancher à l'aveugle.
+
+## Contrôle d'accès à l'application (connexion Microsoft Entra ID)
+
+Jusqu'ici l'appli n'avait **aucune authentification**. Sans conséquence tant
+qu'elle tournait sur ton poste ; inacceptable dès lors qu'elle est publiée
+sur une URL d'hébergeur, où toute personne disposant du lien pourrait
+consulter les audits, les photos et les adresses des clients, et déclencher
+des écritures dans le SharePoint OPT'HELIOS via les identifiants
+`microsoft_app` embarqués côté serveur. Une URL Render n'est pas devinable,
+mais elle n'est pas secrète : elle circule par SMS, par mail, dans les
+historiques de navigateur et les journaux des équipements traversés.
+
+44. **Portail d'accès** (`services/app_auth.py`, nouveau ; branché en
+    première instruction de `app.py::main()`) : connexion OpenID Connect via
+    `st.login()`/`st.user`, seuls les comptes du locataire OPT'HELIOS
+    entrent. Rien n'est lu ni écrit — ni session d'audit, ni appel
+    SharePoint — tant que l'utilisateur n'est pas authentifié. Identité
+    connectée et bouton de déconnexion en pied de barre latérale.
+
+    **Le point de conception qui compte est le comportement quand la
+    configuration est absente.** Laisser passer serait le piège classique du
+    portail permissif : un secret mal déposé chez l'hébergeur rouvrirait
+    l'appli à tous sans que rien ne le signale, puisque tout continuerait de
+    fonctionner normalement. Deux cas sont donc distingués — **en local**,
+    accès autorisé avec un avertissement visible (exiger une connexion Entra
+    ID pour lancer l'appli sur son propre poste serait absurde) ; **sur un
+    hébergeur**, détecté par les variables d'environnement `RENDER`,
+    `FLY_APP_NAME`, `WEBSITE_SITE_NAME` ou `K_SERVICE`, accès **refusé** avec
+    un message explicite. Une erreur de configuration doit fermer l'appli,
+    jamais l'ouvrir.
+
+### DEUX inscriptions Azure, à ne pas confondre
+
+| | À quoi ça sert | Type |
+|---|---|---|
+| `[microsoft_app]` | l'**application** écrit dans SharePoint, sans humain | permissions d'application, consentement admin |
+| `[auth.microsoft]` | l'**utilisateur** humain se connecte pour ouvrir l'appli | OpenID Connect, aucune permission Graph |
+
+Elles sont volontairement séparées. La première détient des droits
+d'écriture larges : partager son secret avec un flux de connexion
+utilisateur serait malsain, et leurs secrets doivent pouvoir être renouvelés
+indépendamment. Ne réutilise donc pas l'inscription "Audit-Solaire-Backend"
+créée plus haut.
+
+### 1. Créer l'inscription pour la connexion
+
+Sur [entra.microsoft.com](https://entra.microsoft.com) → **Inscriptions
+d'applications** → **Nouvelle inscription** :
+
+1. **Nom** : ex. `OPT'HELIOS Audit Solaire — Connexion utilisateurs`.
+2. **Types de comptes pris en charge** : *Comptes dans cet annuaire
+   d'organisation uniquement (locataire unique)*. **C'est ce réglage qui
+   interdit l'entrée à toute personne extérieure à OPT'HELIOS** — surtout
+   pas une option multi-locataires.
+3. **URI de redirection** : type **Web**, valeur
+   `http://localhost:8501/oauth2callback`.
+4. **Inscrire**, puis relever l'**ID d'application (client)** et l'**ID
+   d'annuaire (locataire)**.
+5. **Certificats et secrets** → **Nouveau secret client** → copier la
+   **valeur** immédiatement (jamais réaffichée).
+
+Aucune autorisation d'API à ajouter : `User.Read`, présente par défaut,
+suffit.
+
+### 2. Renseigner les secrets
+
+Copier `.streamlit/secrets.toml.example` vers `.streamlit/secrets.toml` en
+**conservant la section `[microsoft_app]` existante**, puis compléter
+`[auth]` et `[auth.microsoft]`. Le `server_metadata_url` doit contenir l'ID
+de locataire à la place des zéros — c'est lui qui restreint la connexion au
+seul annuaire OPT'HELIOS ; ne pas y mettre `common` ni `organizations`, qui
+ouvriraient l'appli aux comptes de n'importe quelle entreprise.
+
+Générer le `cookie_secret` (le changer déconnecte tout le monde) :
+
+```
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Installer la dépendance, requise par `st.login()` et non installée par
+Streamlit :
+
+```
+pip install "Authlib>=1.3.2"
+```
+
+### 3. Vérifier
+
+```
+streamlit run app.py
+```
+
+Une page de connexion doit s'afficher à la place de l'appli. Après
+authentification Microsoft, l'appli s'ouvre et ton nom apparaît en bas de la
+barre latérale, avec un bouton de déconnexion.
+
+### 4. Au moment de la mise en ligne
+
+**L'URI de redirection doit correspondre au caractère près** entre Azure et
+`secrets.toml` : un `http` contre `https`, un `/` final en trop, et Azure
+refuse avec un message peu parlant.
+
+Il en faut **deux**, pas une : `http://localhost:8501/oauth2callback` pour
+les essais, et `https://<nom-du-service>.onrender.com/oauth2callback` en
+ligne. Une seule inscription Azure les accepte toutes les deux — ajouter la
+seconde le moment venu. En revanche la clé `redirect_uri` des secrets, elle,
+diffère selon l'environnement : celle de ton poste, et celle du Secret File
+Render.
 
 ## Axes d'analyse réglementaire SOCOL / SOLO2018 (sept. 2026)
 
@@ -778,6 +974,15 @@ d'écraser une bonne version par erreur depuis l'appli elle-même.
 
 Un dossier `tests/` (pytest) couvre le modèle de données, le cycle de vie
 d'un point de contrôle, l'écriture des preuves et la génération du rapport.
+
+Depuis sept. 2026, `tests/test_app_auth.py` couvre aussi le contrôle
+d'accès. Au-delà des tests unitaires de la règle, deux tests d'intégration
+exécutent l'appli réelle via le harnais officiel de Streamlit
+(`streamlit.testing.v1.AppTest`) et vérifient qu'avec une variable
+d'hébergeur positionnée et aucune authentification configurée, **aucun
+contenu applicatif n'est rendu** — ni titre, ni navigation. Sans eux, un
+simple oubli d'appel à `require_login()` dans `main()` laisserait tous les
+tests au vert avec une appli grande ouverte sur Internet.
 Volontairement, les appels réseau vers SharePoint (`save_audit`,
 `load_audit`, `upload_evidence_file`) ne sont PAS testés automatiquement
 (nécessiteraient un vrai site ou un mock HTTP complet) : seule la partie
