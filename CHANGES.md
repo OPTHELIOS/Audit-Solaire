@@ -661,11 +661,13 @@ la configuration.
     tableau de bord. Région Francfort (la latence compte : Streamlit renvoie
     chaque interaction au serveur), `PORT` fixé à 8501 pour rester cohérent
     avec `EXPOSE` et `HEALTHCHECK` du Dockerfile, contrôle de santé sur
-    `/_stcore/health`. Le palier `starter` (payant, 7 $/mois) est retenu
-    délibérément : sur le palier gratuit, la mise en veille imposerait 30 à
-    60 s de rechargement d'une image contenant LibreOffice (~1 Go) — sur un
-    téléphone, lancée depuis l'écran d'accueil, l'appli paraîtrait
-    simplement plantée. Remplacer par `free` pour tester sans engagement.
+    `/_stcore/health`. Palier **`free`** pour la phase d'essai : valider construction,
+    connexion et rendu iPhone sans frais, au prix d'une mise en veille après
+    15 min et de 30 à 60 s de réveil (image contenant LibreOffice, ~1 Go). À
+    passer en `starter` (7 $/mois) avant l'usage réel par les auditeurs : une
+    appli qui met une minute à s'ouvrir depuis l'écran d'accueil d'un
+    téléphone paraît plantée. Free comme Starter offrent 512 Mo de mémoire ;
+    un redémarrage pendant un export PDF signalerait qu'elle manque.
 
 43. **Garde-fou sur les fins de ligne** (`.gitattributes`, nouveau) : la
     machine de développement est sous Windows avec `core.autocrlf=true`, et

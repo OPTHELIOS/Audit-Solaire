@@ -26,13 +26,17 @@ services:
     # chaque interaction au serveur par websocket.
     region: frankfurt
 
-    # ATTENTION, CHOIX PAYANT (7 $/mois). Le palier gratuit met le service
-    # en veille après 15 min d'inactivité ; le réveil rechargerait une image
-    # contenant LibreOffice (~1 Go), soit 30 à 60 s d'écran de chargement.
-    # Sur un téléphone, lancée depuis l'écran d'accueil, l'appli paraîtrait
-    # simplement plantée. Remplacer par `free` pour tester sans engagement,
-    # en acceptant ce délai au premier accès de la journée.
-    plan: starter
+    # Palier GRATUIT, choisi pour la phase d'essai (sept. 2026) : valider la
+    # construction, la connexion Microsoft et le rendu sur iPhone sans
+    # engager de frais. Contrepartie : mise en veille après 15 min
+    # d'inactivité, puis 30 à 60 s de réveil au premier accès (l'image
+    # contient LibreOffice, ~1 Go) — sur un téléphone, lancée depuis l'écran
+    # d'accueil, l'appli paraît alors plantée. À passer en `starter`
+    # (7 $/mois, sans mise en veille) AVANT l'usage réel par les auditeurs.
+    # Free comme Starter : 512 Mo de mémoire. Si le service redémarre pendant
+    # un export PDF (LibreOffice est gourmand), c'est qu'elle manque : palier
+    # `standard` (2 Go) dans ce cas.
+    plan: free
 
     # Branche déployée. À faire évoluer si la reconstruction devient un jour
     # la branche principale du dépôt (voir la question ouverte sur `main`).
