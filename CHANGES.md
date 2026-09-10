@@ -776,11 +776,14 @@ Générer le `cookie_secret` (le changer déconnecte tout le monde) :
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Installer la dépendance, requise par `st.login()` et non installée par
-Streamlit :
+Installer les dépendances de connexion, que Streamlit n'installe pas de
+lui-même. Passer par l'extra `[auth]` plutôt que par une liste manuelle :
+une première version de cette consigne ne mentionnait qu'`Authlib`, alors
+que Streamlit 1.62 exige aussi `httpx` — l'appli affichait bien la page de
+connexion, puis plantait au clic sur un `ModuleNotFoundError: httpx`.
 
 ```
-pip install "Authlib>=1.3.2"
+pip install -r requirements.txt
 ```
 
 ### 3. Vérifier
