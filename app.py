@@ -137,7 +137,7 @@ logo = _load_logo(LOGO_PATH)
 favicon = _load_logo(FAVICON_PATH) or logo
 
 st.set_page_config(
-    page_title="OPT'HELIOS - Audit Solaire Thermique",
+    page_title="Opt'Audit - OPT'HELIOS",
     page_icon=favicon if favicon is not None else None,
     layout="wide",
 )
@@ -306,7 +306,7 @@ def main() -> None:
         ],
     )
 
-    st.title("OPT'HELIOS - Audit Solaire Thermique")
+    st.title("Opt'Audit · Audit solaire thermique")
 
     if page == "Dossier":
         import ui.pages._01_dossier as _01_dossier

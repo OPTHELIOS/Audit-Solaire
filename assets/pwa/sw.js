@@ -1,4 +1,4 @@
-// Service worker de l'appli OPT'HELIOS — Audit Solaire Thermique.
+// Service worker de l'appli Opt'Audit (OPT'HELIOS) — audit solaire thermique.
 //
 // Deux raisons d'exister, aucune n'etant la mise en cache de l'appli :
 //
@@ -20,7 +20,9 @@
 // un serveur a jour, panne insoluble pour l'utilisateur. Tout ce qui n'est
 // pas une icone precachee part donc au reseau, systematiquement.
 
-const CACHE = "opthelios-audit-v1";
+// v2 : nouvelles icones (sept. 2026). Changer ce nom force les navigateurs
+// a jeter l'ancien precache, sinon les anciennes icones y resteraient.
+const CACHE = "opthelios-audit-v2";
 const OFFLINE_URL = "/offline.html";
 
 // Strict minimum : l'ecran de repli et les icones. Aucun fichier applicatif.

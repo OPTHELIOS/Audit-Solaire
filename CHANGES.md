@@ -825,6 +825,54 @@ seconde le moment venu. En revanche la clé `redirect_uri` des secrets, elle,
 diffère selon l'environnement : celle de ton poste, et celle du Secret File
 Render.
 
+## Icône et nom de l'application : Opt'Audit (sept. 2026)
+
+45. **Icône dédiée** (`assets/icons/`, régénérée ; source dans
+    `assets/icons/source/icone-opt-audit.jpg`). Retenue parmi trois
+    propositions, après comparaison à taille réelle d'affichage : c'est la
+    plus lisible dans l'onglet du navigateur (à 16 px, elle reste un soleil
+    reconnaissable, là où une icône plus détaillée devient une tache), et
+    elle s'en tient à l'or et au marine de la charte.
+
+    **Sans texte**, volontairement : iOS écrit déjà le nom sous l'icône, et à
+    la taille perçue sur un téléphone la mention devient illisible ; sur une
+    des propositions, le masque arrondi de l'iPhone en rognait même les
+    premières et dernières lettres. `--variante avec-texte` la rétablit si
+    besoin.
+
+    Les fichiers ne sont pas retouchés à la main mais produits par
+    `scripts/generate_icons.py`, parce que chaque plateforme a ses
+    contraintes et que l'image source n'en respecte aucune telle quelle :
+    iOS applique son propre masque arrondi (il faut donc un carré marine
+    plein jusqu'aux bords, faute de quoi des coins clairs apparaissent dans
+    le masque), Android peut rogner l'icône en cercle (d'où une version
+    `icon-maskable-512.png`, déclarée dans le manifest, dont l'emblème tient
+    dans le disque central garanti visible), et les favicons exigent un
+    cadrage serré. Le script écarte aussi les restes du rebord en relief de
+    l'image source, qui faussaient sinon centrage et cadrage. **Pour changer
+    d'icône : remplacer l'image source et relancer le script.**
+
+    Le cache du service worker passe en `v2`, pour que les navigateurs
+    jettent les anciennes icônes précachées.
+
+46. **Nouveau nom : Opt'Audit** — sous l'icône de l'écran d'accueil
+    (`apple-mobile-web-app-title` dans `scripts/patch_streamlit_pwa.py`),
+    dans le manifest (Android), le titre de l'onglet, l'en-tête de l'appli,
+    la page de connexion et l'écran hors réseau. Seule l'identité de l'appli
+    change : le terme « audit solaire thermique » des rapports reste tel
+    quel.
+
+    **Non renommés, délibérément :** le service Render
+    (`opthelios-audit-solaire`) et donc son adresse
+    `https://opthelios-audit-solaire.onrender.com` — la changer imposerait
+    une nouvelle URI de redirection dans Azure et un nouveau Secret File ;
+    et les inscriptions Azure, dont le nom n'est visible que des
+    administrateurs.
+
+    **Sur un iPhone où l'appli était déjà installée :** supprimer l'icône
+    de l'écran d'accueil et la rajouter depuis Safari. iOS conserve l'image
+    et le nom enregistrés au moment de l'ajout.
+
 ## Axes d'analyse réglementaire SOCOL / SOLO2018 (sept. 2026)
 
 Demande explicite : compléter l'audit avec des axes d'analyse réglementaire

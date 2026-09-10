@@ -282,7 +282,7 @@ def test_integration_local_non_protege_affiche_lappli_et_avertit(
         "non protégé" in w.value.lower() for w in at.sidebar.warning
     ), "l'avertissement d'acces non protege est absent"
     assert any(
-        "Audit Solaire Thermique" in t.value for t in at.title
+        "Opt'Audit" in t.value for t in at.title
     ), "l'appli aurait du s'afficher normalement en local"
 
 

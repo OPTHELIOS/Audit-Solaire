@@ -248,7 +248,7 @@ def require_login(logo_path: str | None = None) -> None:
                 st.image(logo_path, width="stretch")
             except Exception:
                 pass
-        st.title("Audit Solaire Thermique")
+        st.title("Opt'Audit")
         st.caption(
             "Accès réservé aux collaborateurs OPT'HELIOS. "
             "Connectez-vous avec votre compte Microsoft professionnel."

@@ -40,7 +40,7 @@ HEAD_INJECTION = MARKER + """
 <meta name="theme-color" content="#1C1E3D">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Audit OPT'HELIOS">
+<meta name="apple-mobile-web-app-title" content="Opt'Audit">
 <!-- Equivalent standard de `apple-mobile-web-app-capable`, desormais la
      forme recommandee et celle que lit Chrome/Android. Les deux sont
      conservees : iOS ne reconnait que la variante prefixee `apple-`. -->
@@ -65,6 +65,7 @@ ASSET_FILES = [
     "apple-touch-icon.png",
     "icon-192.png",
     "icon-512.png",
+    "icon-maskable-512.png",
     "favicon.ico",
     "favicon-32.png",
     "favicon-16.png",
