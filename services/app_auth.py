@@ -34,6 +34,7 @@ distingue donc les deux situations :
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 
 import streamlit as st
@@ -133,6 +134,65 @@ def _provider_name() -> str | None:
     return None
 
 
+# Forme d'un identifiant Azure : 5 blocs hexadecimaux separes par 4 tirets.
+# C'est la forme de l'"ID secret", jamais celle de la "Valeur" d'un secret
+# client (une quarantaine de caracteres d'un seul tenant, avec ~ . _).
+_GUID = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+# Marqueurs des textes d'exemple de .streamlit/secrets.toml.example et du
+# fichier prepare lors de la mise en place.
+_PLACEHOLDER_MARKERS = ("REMPLACER", "COLLER_ICI")
+
+
+def secret_problem(client_secret: str | None) -> str | None:
+    """Detecte les deux erreurs de saisie du secret client rencontrees en
+    pratique lors de la mise en place, et renvoie un message explicite, ou
+    None si le secret a une forme plausible. Fonction pure, testable.
+
+    Sans ce controle, ces deux erreurs ne se revelent qu'au clic sur "Se
+    connecter", par un echec cote Microsoft (AADSTS7000215) sans rapport
+    apparent avec leur cause. Elles se reproduiront au renouvellement du
+    secret, a son expiration : autant les nommer.
+
+    Ne valide PAS le secret aupres d'Azure (ce serait un appel reseau a
+    chaque affichage) : un secret de forme plausible mais revoque passera ce
+    controle et echouera a la connexion, comme avant.
+    """
+    if not client_secret or not client_secret.strip():
+        return "Le secret client est vide."
+    value = client_secret.strip()
+    if any(marker in value.upper() for marker in _PLACEHOLDER_MARKERS):
+        return (
+            "Le secret client n'a pas été renseigné : la configuration "
+            "contient encore le texte d'exemple."
+        )
+    if _GUID.match(value):
+        return (
+            "Le secret client a la forme d'un identifiant (5 blocs séparés "
+            "par des tirets) : c'est l'« ID secret » affiché par Azure, pas "
+            "sa « Valeur ». Dans Certificats et secrets, la Valeur est la "
+            "3ᵉ colonne ; si elle n'est plus affichée, supprimer le secret et "
+            "en créer un nouveau."
+        )
+    return None
+
+
+def _client_secret() -> str | None:
+    """Secret client du fournisseur configure, a plat ou nomme."""
+    try:
+        auth = st.secrets["auth"]
+        if auth.get("client_id"):
+            return auth.get("client_secret")
+        for value in auth.values():
+            # Mapping, pas dict : voir la note dans is_auth_configured().
+            if isinstance(value, Mapping) and value.get("client_id"):
+                return value.get("client_secret")
+    except Exception:
+        pass
+    return None
+
+
 def require_login(logo_path: str | None = None) -> None:
     """Portail d'entree. A appeler tout en haut de `main()`, avant toute
     lecture de donnees d'audit. Interrompt le script (`st.stop()`) tant que
@@ -167,6 +227,20 @@ def require_login(logo_path: str | None = None) -> None:
         st.stop()
 
     # decision == LOGIN_REQUIRED
+    #
+    # Secret manifestement mal saisi : message explicite a la place d'un
+    # bouton de connexion qui echouerait chez Microsoft sans explication.
+    problem = secret_problem(_client_secret())
+    if problem:
+        st.error(
+            "**Connexion impossible — configuration à corriger.**\n\n"
+            + problem
+            + "\n\nAdministrateur : voir CHANGES.md, section « Contrôle "
+            "d'accès à l'application ».",
+            icon=":material/key_off:",
+        )
+        st.stop()
+
     _, center, _ = st.columns([1, 2, 1])
     with center:
         if logo_path:

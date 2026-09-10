@@ -796,6 +796,20 @@ Une page de connexion doit s'afficher à la place de l'appli. Après
 authentification Microsoft, l'appli s'ouvre et ton nom apparaît en bas de la
 barre latérale, avec un bouton de déconnexion.
 
+**Si l'appli affiche « Connexion impossible — configuration à corriger »**
+à la place du bouton de connexion, elle a reconnu l'une des deux erreurs de
+saisie rencontrées lors de la mise en place : le texte d'exemple resté dans
+le fichier, ou l'« ID secret » d'Azure collé à la place de sa « Valeur »
+(l'ID a la forme de 5 blocs séparés par 4 tirets, la Valeur jamais). Le
+message précise laquelle. Ce contrôle ne porte que sur la forme : un secret
+expiré ou supprimé dans Azure le passe sans encombre, et échoue au moment de
+la connexion.
+
+**Ne jamais faire de capture d'écran de `secrets.toml`**, même partielle,
+pour demander de l'aide : un secret visible sur une image doit être
+considéré comme compromis et renouvelé. C'est arrivé lors de la mise en
+place ; le secret concerné a été supprimé dans Azure et remplacé.
+
 ### 4. Au moment de la mise en ligne
 
 **L'URI de redirection doit correspondre au caractère près** entre Azure et

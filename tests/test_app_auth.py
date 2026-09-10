@@ -335,6 +335,10 @@ def test_integration_page_de_connexion_remplace_lappli(sans_hebergeur, monkeypat
     connexion surmontant une appli deja rendue ne protegerait rien."""
     monkeypatch.setattr(app_auth, "is_auth_configured", lambda: True)
     monkeypatch.setattr(app_auth, "is_logged_in", lambda: False)
+    # Secret de forme plausible, pour ne pas dependre du secrets.toml local :
+    # sans cela, sur un poste sans configuration, le controle de forme du
+    # secret afficherait une erreur a la place du bouton de connexion.
+    monkeypatch.setattr(app_auth, "_client_secret", lambda: PLAUSIBLE_SECRET)
 
     at = AppTest.from_file(APP, default_timeout=120).run()
 
@@ -343,3 +347,71 @@ def test_integration_page_de_connexion_remplace_lappli(sans_hebergeur, monkeypat
         "Se connecter" in b.label for b in at.button
     ), "le bouton de connexion est absent"
     assert not at.sidebar.radio, "la navigation a ete rendue avant la connexion"
+
+
+
+# ---------------------------------------------------------------------
+# secret_problem — les deux erreurs de saisie rencontrees en pratique
+# ---------------------------------------------------------------------
+# Lors de la mise en place : 1) le texte d'exemple laisse dans le fichier,
+# 2) l'"ID secret" d'Azure colle a la place de sa "Valeur". Dans les deux
+# cas, l'echec ne survenait qu'au clic, cote Microsoft, sans rapport
+# apparent avec la cause.
+
+# Forme d'une Valeur de secret Azure (fictive) : un seul bloc, avec ~ . _ -
+PLAUSIBLE_SECRET = "abc8Q~kL9x.mNp2rS-vW3yZ4tU6iO8pQ0aB1cD_e"
+ID_SECRET = "a8853003-39a8-49f6-b382-5053c0896893"
+
+
+def test_secret_plausible_accepte():
+    assert app_auth.secret_problem(PLAUSIBLE_SECRET) is None
+
+
+def test_id_secret_au_lieu_de_la_valeur_detecte():
+    message = app_auth.secret_problem(ID_SECRET)
+    assert message and "ID secret" in message
+
+
+def test_id_secret_entoure_d_espaces_detecte():
+    assert app_auth.secret_problem("  " + ID_SECRET + "  ")
+
+
+def test_tirets_sans_forme_guid_pas_de_faux_positif():
+    # Une vraie Valeur peut contenir des tirets : seul le motif GUID exact
+    # (hexadecimal, 8-4-4-4-12) doit declencher l'alerte.
+    assert app_auth.secret_problem("abc8Q~kL-9x.m-Np2r-S~vW-3yZ4tU6iO8pQ") is None
+
+
+def test_texte_d_exemple_detecte():
+    for exemple in (
+        "COLLER_ICI_LA_VALEUR_DU_SECRET",
+        "A_REMPLACER_NOUVEAU_SECRET_AZURE",
+        "REMPLACER — valeur affichee une seule fois par le portail Azure",
+    ):
+        message = app_auth.secret_problem(exemple)
+        assert message and "exemple" in message, exemple
+
+
+def test_secret_vide_detecte():
+    for vide in (None, "", "   "):
+        assert app_auth.secret_problem(vide), repr(vide)
+
+
+def test_client_secret_lu_avec_les_vrais_objets_streamlit():
+    with _with_secrets({"auth": AttrDict(AUTH_COMPLETE["auth"])}):
+        assert app_auth._client_secret() == "secret"
+
+
+def test_integration_secret_mal_saisi_remplace_le_bouton(sans_hebergeur, monkeypatch):
+    # Secret en forme d'ID : message explicite, et surtout PAS de bouton de
+    # connexion qui echouerait chez Microsoft sans explication.
+    monkeypatch.setattr(app_auth, "is_auth_configured", lambda: True)
+    monkeypatch.setattr(app_auth, "is_logged_in", lambda: False)
+    monkeypatch.setattr(app_auth, "_client_secret", lambda: ID_SECRET)
+
+    at = AppTest.from_file(APP, default_timeout=120).run()
+
+    assert not at.exception, at.exception
+    assert any("ID secret" in e.value for e in at.error), "message absent"
+    assert not any("Se connecter" in b.label for b in at.button)
+    assert not at.sidebar.radio, "la navigation a ete rendue"
